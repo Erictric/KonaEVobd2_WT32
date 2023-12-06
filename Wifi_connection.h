@@ -3,7 +3,7 @@
 
 #include "WiFi.h"
 #include "WiFiMulti.h"
-#include <LovyanGFX.hpp>
+#include "TFT_eSPI.h"
 
 WiFiMulti wifiMulti;
 
@@ -12,26 +12,26 @@ const char* password = "3D4F2F3311D5";
 const char* ssid2 = "SM-G950W2093";
 const char* password2 = "5311Fond";
 
-void ConnectWifi(LGFX& lcd){
+void ConnectWifi(TFT_eSPI& tft){
   char strRetries[2];
   Serial.print("Connecting to Wifi "); 
   
   wifiMulti.addAP(ssid, password);
   wifiMulti.addAP(ssid2, password2);
     
-  lcd.fillScreen(TFT_BLACK);
-  lcd.setTextSize(2);
-  lcd.drawString("Connecting", lcd.width() / 2, lcd.height() / 2 - 16);
-  lcd.drawString("To", lcd.width() / 2, lcd.height() / 2);
-  lcd.drawString("Wifi", lcd.width() / 2, lcd.height() / 2 + 16);
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextSize(2);
+  tft.drawString("Connecting", tft.width() / 2, tft.height() / 2 - 16);
+  tft.drawString("To", tft.width() / 2, tft.height() / 2);
+  tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 + 16);
   
   int retries = 0; 
   while (wifiMulti.run() != WL_CONNECTED  && (retries++ < 3)) { // 2 attempts 
     dtostrf(retries,1,0,strRetries);        
     Serial.print("attempts: ");Serial.println(retries);
-    lcd.fillScreen(TFT_BLACK);
-    lcd.drawString("Retry:", lcd.width() / 2, lcd.height() / 2 - 16);
-    lcd.drawString(strRetries, lcd.width() / 2, lcd.height() / 2);
+    tft.fillScreen(TFT_BLACK);
+    tft.drawString("Retry:", tft.width() / 2, tft.height() / 2 - 16);
+    tft.drawString(strRetries, tft.width() / 2, tft.height() / 2);
   }
   Serial.println("");
 
@@ -41,20 +41,20 @@ void ConnectWifi(LGFX& lcd){
     Serial.print(", IP address: "); 
     Serial.println(WiFi.localIP());
   
-    lcd.fillScreen(TFT_BLACK);
-    lcd.drawString("Wifi", lcd.width() / 2, lcd.height() / 2 - 16);
-    lcd.drawString("Connected", lcd.width() / 2, lcd.height() / 2);    
+    tft.fillScreen(TFT_BLACK);
+    tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 16);
+    tft.drawString("Connected", tft.width() / 2, tft.height() / 2);    
     delay(500);  
   }
   else
   {
     Serial.print("Failed to connect"); 
      
-    lcd.fillScreen(TFT_BLACK);
-    lcd.drawString("Wifi", lcd.width() / 2, lcd.height() / 2 - 16);
-    lcd.drawString("Failed", lcd.width() / 2, lcd.height() / 2);
-    lcd.drawString("To", lcd.width() / 2, lcd.height() / 2 + 16);
-    lcd.drawString("Connect", lcd.width() / 2, lcd.height() / 2 + 32);
+    tft.fillScreen(TFT_BLACK);
+    tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 16);
+    tft.drawString("Failed", tft.width() / 2, tft.height() / 2);
+    tft.drawString("To", tft.width() / 2, tft.height() / 2 + 16);
+    tft.drawString("Connect", tft.width() / 2, tft.height() / 2 + 32);
     delay(1000); 
   }
 }
