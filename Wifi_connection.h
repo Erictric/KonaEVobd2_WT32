@@ -7,7 +7,7 @@
 
 WiFiMulti wifiMulti;
 
-const char* ssid = "VIRGIN131";
+const char* ssid = "VIRGIN133";
 const char* password = "3D4F2F3311D5";
 const char* ssid2 = "SM-G950W2093";
 const char* password2 = "5311Fond";
@@ -16,21 +16,22 @@ void ConnectWifi(TFT_eSPI& tft){
   char strRetries[2];
   Serial.print("Connecting to Wifi "); 
   
-  wifiMulti.addAP(ssid, password);
+  //wifiMulti.addAP(ssid, password);
   wifiMulti.addAP(ssid2, password2);
     
   tft.fillScreen(TFT_BLACK);
   tft.setTextSize(2);
-  tft.drawString("Connecting", tft.width() / 2, tft.height() / 2 - 16);
+  tft.setFreeFont(&FreeSans9pt7b);
+  tft.drawString("Connecting", tft.width() / 2, tft.height() / 2 - 50);
   tft.drawString("To", tft.width() / 2, tft.height() / 2);
-  tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 + 16);
+  tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 + 50);
   
   int retries = 0; 
   while (wifiMulti.run() != WL_CONNECTED  && (retries++ < 3)) { // 2 attempts 
     dtostrf(retries,1,0,strRetries);        
     Serial.print("attempts: ");Serial.println(retries);
     tft.fillScreen(TFT_BLACK);
-    tft.drawString("Retry:", tft.width() / 2, tft.height() / 2 - 16);
+    tft.drawString("Retry", tft.width() / 2, tft.height() / 2 - 50);
     tft.drawString(strRetries, tft.width() / 2, tft.height() / 2);
   }
   Serial.println("");
@@ -42,7 +43,7 @@ void ConnectWifi(TFT_eSPI& tft){
     Serial.println(WiFi.localIP());
   
     tft.fillScreen(TFT_BLACK);
-    tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 16);
+    tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 50);
     tft.drawString("Connected", tft.width() / 2, tft.height() / 2);    
     delay(500);  
   }
@@ -51,10 +52,10 @@ void ConnectWifi(TFT_eSPI& tft){
     Serial.print("Failed to connect"); 
      
     tft.fillScreen(TFT_BLACK);
-    tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 16);
+    tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 50);
     tft.drawString("Failed", tft.width() / 2, tft.height() / 2);
-    tft.drawString("To", tft.width() / 2, tft.height() / 2 + 16);
-    tft.drawString("Connect", tft.width() / 2, tft.height() / 2 + 32);
+    tft.drawString("To", tft.width() / 2, tft.height() / 2 + 50);
+    tft.drawString("Connect", tft.width() / 2, tft.height() / 2 + 100);
     delay(1000); 
   }
 }

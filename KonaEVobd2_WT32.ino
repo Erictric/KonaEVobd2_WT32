@@ -25,32 +25,37 @@
 #include "WiFi.h"
 #include "Free_Fonts.h"
 #include <Adafruit_FT6206.h>
+//#include "Button_Select.h"
 
 #define DEBUG_PORT Serial
 
 TaskHandle_t Task1;
+//TaskHandle_t Task2;
 
 TFT_eSPI tft = TFT_eSPI();
 Adafruit_FT6206 ts = Adafruit_FT6206();
 
-// Variables for touch x,y
-static int32_t x, y;
-
 //TFT y positions for texts and numbers
-#define textLvl1 5  // y coordinates for text
-#define textLvl2 68
-#define textLvl3 129
-#define textLvl4 189
-#define drawLvl1 35  // and numbers
-#define drawLvl2 96
-#define drawLvl3 156
-#define drawLvl4 217  // TTGO 135x240 TFT display
+#define textLvl1 70  // y coordinates for text
+#define textLvl2 140
+#define textLvl3 210
+#define textLvl4 280
+#define textLvl5 350
+#define drawLvl1 105  // and numbers
+#define drawLvl2 175
+#define drawLvl3 245
+#define drawLvl4 315
+#define drawLvl5 385  // TTGO 320x480 TFT display
 
-#define BUTTON_PIN 0
-#define BUTTON_2_PIN 35
+//#define BUTTON_PIN 0
+//#define BUTTON_2_PIN 35
+#define Threshold 40 /* Greater the value, more the sensitivity */
 
-Button bouton(BUTTON_PIN);
-Button bouton2(BUTTON_2_PIN);
+RTC_DATA_ATTR int bootCount = 0;
+touch_pad_t touchPin;
+
+//Button bouton(BUTTON_PIN);
+//Button bouton2(BUTTON_2_PIN);
 
 #define pagenumbers 7  // number of pages to display
 #define N_km 10        //variable for the calculating kWh/100km over a N_km
@@ -240,28 +245,156 @@ char title1[12];
 char title2[12];
 char title3[12];
 char title4[12];
+char title5[12];
+char title6[12];
+char title7[12];
+char title8[12];
+char title9[12];
+char title10[12];
 char value1[5];
 char value2[5];
 char value3[5];
 char value4[5];
+char value5[5];
+char value6[5];
+char value7[5];
+char value8[5];
+char value9[5];
+char value10[5];
 char prev_value1[5];
 char prev_value2[5];
 char prev_value3[5];
 char prev_value4[5];
+char prev_value5[5];
+char prev_value6[5];
+char prev_value7[5];
+char prev_value8[5];
+char prev_value9[5];
+char prev_value10[5];
 bool negative_flag1;
 bool negative_flag2;
 bool negative_flag3;
 bool negative_flag4;
+bool negative_flag5;
+bool negative_flag6;
+bool negative_flag7;
+bool negative_flag8;
+bool negative_flag9;
+bool negative_flag10;
 float value1_float;
 float value2_float;
 float value3_float;
 float value4_float;
+float value5_float;
+float value6_float;
+float value7_float;
+float value8_float;
+float value9_float;
+float value10_float;
 int nbr_decimal1;
 int nbr_decimal2;
 int nbr_decimal3;
 int nbr_decimal4;
+int nbr_decimal5;
+int nbr_decimal6;
+int nbr_decimal7;
+int nbr_decimal8;
+int nbr_decimal9;
+int nbr_decimal10;
 bool Charge_page = false;
 bool Power_page = false;
+
+bool datasent = false;
+
+// Variables for touch x,y
+static int32_t x, y;
+TS_Point p;
+static int xMargin = 20, yMargin = 420, margin = 20, btnWidth = 80, btnHeigth = 55;
+char* BtnAtext = "MAIN";
+char* BtnBtext = "BATT";
+char* BtnCtext = "POWER";
+char MainTitle[12];
+
+unsigned long initTouchTime = 0;
+unsigned long TouchTime = 0;
+bool TouchLatch = false;
+bool Btn1Clicked = false;
+bool Btn2Clicked = false;
+bool Btn3Clicked = false;
+bool Btn1SetON = true;
+bool Btn2SetON = false;
+bool Btn3SetON = false;
+bool buttonReleased = true;
+
+struct RoundedRect {
+  int xStart;
+  int yStart;
+  int xWidth;
+  int yHeight;
+  byte cornerRadius;
+  uint16_t color;
+  char* BtnText;
+};
+
+RoundedRect btnAgreen = {
+  xMargin,
+  yMargin,
+  btnWidth,
+  btnHeigth,
+  4,
+  TFT_GREEN,
+  BtnAtext
+};
+
+RoundedRect btnBgreen = {
+  btnAgreen.xStart + btnAgreen.xWidth + margin,
+  yMargin,
+  btnWidth,
+  btnHeigth,
+  4,
+  TFT_GREEN,
+  BtnBtext
+};
+
+RoundedRect btnCgreen = {
+  btnBgreen.xStart + btnBgreen.xWidth + margin,
+  yMargin,
+  btnWidth,
+  btnHeigth,
+  4,
+  TFT_GREEN,
+  BtnCtext
+};
+
+RoundedRect btnAred = {
+  xMargin,
+  yMargin,
+  btnWidth,
+  btnHeigth,
+  4,
+  TFT_WHITE,
+  BtnAtext
+};
+
+RoundedRect btnBred = {
+  btnAred.xStart + btnAred.xWidth + margin,
+  yMargin,
+  btnWidth,
+  btnHeigth,
+  4,
+  TFT_WHITE,
+  BtnBtext
+};
+
+RoundedRect btnCred = {
+  btnBred.xStart + btnBred.xWidth + margin,
+  yMargin,
+  btnWidth,
+  btnHeigth,
+  4,
+  TFT_WHITE,
+  BtnCtext
+};
 
 unsigned long ESPinitTimer = 0;
 unsigned long ESPTimer = 0;
@@ -286,15 +419,9 @@ const char* server = "maker.ifttt.com";
 static bool flag = false;
 
 /*////// Variables for OBD data timing ////////////*/
-const long obd_update = 100;       // interval to update OBD data (milliseconds)
 unsigned long currentMillis;       // timing variable to sample OBD data
 unsigned long previousMillis = 0;  // timing variable to sample OBD data
 uint8_t pid_counter = 0;
-
-/*////// Variables for Buttons ////////////*/
-const long Longinterval = 3000;  // interval for long button press (milliseconds)
-unsigned long InitMillis;        // will store time when button is pressed
-unsigned long InitMillis2;       // will store time when button is pressed
 
 /*///////Define a structure to store the PID query data frames ///////////*/
 struct dataFrames_struct {
@@ -304,6 +431,9 @@ struct dataFrames_struct {
 typedef struct dataFrames_struct dataFrames;  // create a simple name for this type of data
 dataFrames results;                           // this struct will hold the results
 
+void callback(){
+  //placeholder callback function
+}
 
 /*////////////////////////////////////////////////////////////////////////*/
 /*                         START OF SETUP                                 */
@@ -317,12 +447,17 @@ void setup() {
 
   Serial.begin(115200);
 
+  // Pins 18/19 are SDA/SCL for touch sensor on this device
+  // 40 is a touch threshold
+  if (!ts.begin(18, 19, 40)) {
+    Serial.println("Couldn't start touchscreen controller");
+    while (true);
+  }
   tft.init();
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, 128);
 
-  // Setting display to landscape
-  //if (tft.width() > tft.height()) tft.setRotation(tft.getRotation() ^ 2);
+  
 
   while (!Serial) {
     ;  // wait for serial port to connect. Needed for native USB port only
@@ -333,11 +468,6 @@ void setup() {
 
   //pinMode(VESSoff, OUTPUT); // enable output pin that activate a relay to temporary disable the VESS
 
-  /*//////////////Initialise buttons ////////////////*/
-
-  bouton.begin();   // left button
-  bouton2.begin();  // right button
-
   /*//////////////Initialise OLED display ////////////////*/
 
   tft.begin();
@@ -347,14 +477,24 @@ void setup() {
   tft.setCursor(0, 0);
   tft.setTextDatum(MC_DATUM);
   tft.setTextSize(2);
+  tft.setFreeFont(&FreeSans9pt7b);
 
   /*////// initialize EEPROM with predefined size ////////*/
   EEPROM.begin(148);
 
   /* uncomment if you need to display Safestring results on Serial Monitor */
   //SafeString::setOutput(Serial);
+  
+  //Increment boot number and print it every reboot
+  ++bootCount;
+  Serial.println("Boot number: " + String(bootCount));
 
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_35, 0);  // initialize ESP wakeup on button 1 activation
+  //Setup interrupt on Touch Pad 2 (GPIO2)
+  touchAttachInterrupt(T2, callback, Threshold);
+
+  //Configure Touchpad as wakeup source
+  esp_sleep_enable_touchpad_wakeup();
+  //esp_sleep_enable_ext0_wakeup(GPIO_NUM_19,0);  // initialize ESP wakeup on button 1 activation
 
   /*////// Get the stored values from last re-initialisation /////*/
 
@@ -435,7 +575,7 @@ void setup() {
 
   nbr_powerOn += 1;
   EEPROM.writeFloat(40, nbr_powerOn);
-  EEPROM.commit();
+  EEPROM.commit();  
 }
 
 /*////////////////////////////////////////////////////////////////////////*/
@@ -511,6 +651,9 @@ int convertToInt(char* dataFrame, size_t startByte, size_t numberBytes) {
 void read_data() {
 
   pid_counter++;
+  Serial.println(pid_counter);
+
+  button();
 
   // read in rawData via ODBII
   
@@ -518,6 +661,7 @@ void read_data() {
   myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
 
   if (myELM327.queryPID("220101")) {  // Service and Message PID = hex 22 0101 => dec 34, 257
+    Serial.println("read PID101");
 
     char* payload = myELM327.payload;
     size_t payloadLen = myELM327.recBytes;
@@ -569,7 +713,9 @@ void read_data() {
   switch (pid_counter) {
     case 1:
 
+      button();
       myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
+      Serial.println("read PID105");
 
       if (myELM327.queryPID("220105")) {  // Service and Message PID = hex 22 0105 => dec 34, 261
         char* payload = myELM327.payload;
@@ -594,6 +740,7 @@ void read_data() {
 
     case 2:
 
+      button();
       myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
 
       if (myELM327.queryPID("220106")) {  // Service and Message PID = hex 22 0106 => dec 34, 262
@@ -611,6 +758,8 @@ void read_data() {
       break;
 
     case 3:
+      
+      button();
       myELM327.sendCommand("AT SH 7E2");  // Set Header for Vehicle Control Unit
 
       if (myELM327.queryPID("2101")) {  // Service and Message PID
@@ -634,6 +783,8 @@ void read_data() {
       break;
 
     case 4:
+      
+      button();
       myELM327.sendCommand("AT SH 7E2");  // Set Header for Vehicle Control Unit
       if (myELM327.queryPID("2102")) {    // Service and Message PID
         char* payload = myELM327.payload;
@@ -653,6 +804,8 @@ void read_data() {
       break;
 
     case 5:
+      
+      button();
       myELM327.sendCommand("AT SH 7C6");  // Set Header for CLU Cluster Module
       if (myELM327.queryPID("22B002")) {  // Service and Message PID
         char* payload = myELM327.payload;
@@ -664,6 +817,8 @@ void read_data() {
       break;
 
     case 6:
+
+      button();
       myELM327.sendCommand("AT SH 7B3");  //Set Header Aircon
       if (myELM327.queryPID("220100")) {  // Service and Message PID
         char* payload = myELM327.payload;
@@ -676,6 +831,8 @@ void read_data() {
       break;
 
     case 7:
+
+      button();
       myELM327.sendCommand("AT SH 7D4");  //Set Speed Header
       if (myELM327.queryPID("220101")) {  // Service and Message PID
         char* payload = myELM327.payload;
@@ -688,6 +845,8 @@ void read_data() {
       break;
 
     case 8:
+
+      button();
       myELM327.sendCommand("AT SH 7A0");  //Set BCM Header
       if (myELM327.queryPID("22C00B")) {  // Service and Message PID
         char* payload = myELM327.payload;
@@ -838,12 +997,12 @@ void read_data() {
 
     if (Max_Pwr < 100 && (Max_Pwr < (Power + 20)) && !Power_page) {  //select the Max Power page if Power+20kW exceed Max_Pwr when Max_Pwr is lower then 100kW.
       DrawBackground = true;
-      screenNbr = 4;
+      screenNbr = 2;
       Power_page = true;
     }
     if (Power < 0 && (SpdSelect == 'P') && !Charge_page) {
       DrawBackground = true;
-      screenNbr = 3;
+      screenNbr = 2;
       Charge_page = true;
     }
   }
@@ -1096,7 +1255,7 @@ float calc_kwh(float min_SoC, float max_SoC) {
 
 void makeIFTTTRequest(void* pvParameters) {
   for (;;) {
-    if (send_enabled && send_data) {
+    if (send_enabled && send_data) {      
       code_sent = false;
       Serial.print("Connecting to ");
       Serial.print(server);
@@ -1284,7 +1443,7 @@ void makeIFTTTRequest(void* pvParameters) {
       client.println(jsonObject.length());
       client.println();
       client.println(jsonObject);
-
+      
       int timeout = 5;  // 50 * 100mS = 5 seconds
       while (!!!client.available() && (timeout-- > 0)) {
         delay(100);
@@ -1299,6 +1458,7 @@ void makeIFTTTRequest(void* pvParameters) {
 
       Serial.println();
       Serial.println("closing connection");
+      datasent = true;
       client.stop();
 
       send_data = false;
@@ -1316,8 +1476,8 @@ void makeIFTTTRequest(void* pvParameters) {
         Serial.println("Sending code sent");
         code_sent = true;
       }
-    }
-    vTaskDelay(10);  // some delay is required to reset watchdog timer
+    }    
+    vTaskDelay(30);  // some delay is required to reset watchdog timer    
   }
 }
 
@@ -1325,67 +1485,113 @@ void makeIFTTTRequest(void* pvParameters) {
 //                        Button functions
 //--------------------------------------------------------------------------------------------
 
-void ButtonLoop() {
+void drawRoundedRect(RoundedRect toDraw){
+  tft.fillRoundRect(
+    toDraw.xStart,
+    toDraw.yStart,
+    toDraw.xWidth, 
+    toDraw.yHeight, 
+    toDraw.cornerRadius,
+    toDraw.color
+  );
+  int box1TextX = toDraw.xStart + (toDraw.xWidth / 2);
+  int box1TextY = toDraw.yStart + (toDraw.yHeight / 2);
+  tft.setCursor(box1TextX, box1TextY);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextPadding(toDraw.xWidth);
+  tft.setFreeFont(&FreeSans9pt7b);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_BLACK,toDraw.color);  
+  tft.drawString(toDraw.BtnText, box1TextX, box1TextY);    
+}
 
-  if (bouton.pressed()) {
-    InitMillis = millis();
-    Serial.println("Button pressed");
-  }
-  if (bouton.released()) {
-    if (millis() - InitMillis >= Longinterval) {
-      Serial.println("Button Long press");
-      if (screenNbr == 0) {
-        InitRst = true;
-        PrevSoC = 0;
-        return;
-      }
-    }
-
-    else {
-      Serial.println("Button short press");
-      Serial.print("screenNbr");
-      Serial.print(screenNbr);
-      DrawBackground = true;
-      if (screenNbr == (pagenumbers - 1)) {
-        screenNbr = 0;
-      } else if (screenNbr < pagenumbers - 1) {
-        screenNbr++;
-      }
-    }
-  }
-  if (bouton2.pressed()) {
-    InitMillis2 = millis();
-    //Serial.println("Button2 pressed");
-  }
-
-  if (bouton2.released()) {
-    if (millis() - InitMillis2 >= Longinterval) {
-      Serial.println("Button2 Long press");
-      if (!SetupOn) {
-        SetupOn = true;
-      } else {
-        //EEPROM.writeBool(40, StayOn);
-        //EEPROM.commit();
-        SetupOn = false;
-        DrawBackground = true;
-      }
-    } else {
-      //Serial.println("Button2 short press");
-      if (SetupOn) {
-        if (StayOn) {
-          StayOn = false;
-          Serial.println("StayOn: ");
-          Serial.println(StayOn);
-        } else {
-          StayOn = true;
-          Serial.println("StayOn: ");
-          Serial.println(StayOn);
+void button(){
+  if (ts.touched()) {
+    p = ts.getPoint();
+    x = p.x;
+    y = p.y;      
+    //Button 1 test
+    if ((x >= btnAgreen.xStart && x <= btnAgreen.xStart + btnAgreen.xWidth) && (y >= btnAgreen.yStart && y <= btnAgreen.yStart + btnAgreen.yHeight)) {      
+      TouchTime = (millis() - initTouchTime) / 1000;      
+      if (TouchTime > 4 & !TouchLatch){
+        Serial.println("Button1 Long Press");
+        TouchLatch = true;        
+        InitRst = true;            
+        PrevSoC = 0;        
+        
+      }            
+      if (!Btn1SetON)
+      {  
+          screenNbr = 0;
+          Serial.println("Button1 Touched");        
+          Serial.println("Button1 set to ON");          
+          DrawBackground = true;                 
+          Btn1SetON = true;
+        if (Btn2SetON){
+          Btn2SetON = false;        
         }
-      } else {
-        screenNbr = 0;
-        DrawBackground = true;
+        if (Btn3SetON){
+          Btn3SetON = false;        
+        }
+      }   
+    } 
+        
+    //Button 2 test
+    if ((x >= btnBgreen.xStart && x <= btnBgreen.xStart + btnBgreen.xWidth) && (y >= btnBgreen.yStart && y <= btnBgreen.yStart + btnBgreen.yHeight)) {      
+      TouchTime = (millis() - initTouchTime) / 1000;
+      if (TouchTime >= 4 & !TouchLatch){
+        TouchLatch = true;        
+        Serial.println("Button2 Long Press");
+        screenNbr = 3;
+        DrawBackground = true;        
+        Btn2SetON = true;
       }
+      if (!Btn2SetON)
+      {            
+        screenNbr = 1;
+        Serial.println("Button2 Touched");        
+        Serial.println("Button2 set to ON");        
+        DrawBackground = true;        
+        Btn2SetON = true; 
+        if (Btn1SetON){ 
+          Btn1SetON = false;        
+        }
+        if (Btn3SetON){ 
+          Btn3SetON = false;        
+        }       
+      }           
     }
+
+    //Button 3 test
+    if ((x >= btnCgreen.xStart && x <= btnCgreen.xStart + btnCgreen.xWidth) && (y >= btnCgreen.yStart && y <= btnCgreen.yStart + btnCgreen.yHeight)) {      
+      TouchTime = (millis() - initTouchTime) / 1000;
+      if (TouchTime >= 4 & !TouchLatch){
+        TouchLatch = true;        
+        Serial.println("Button3 Long Press");
+        screenNbr = 3;
+        DrawBackground = true;        
+        Btn3SetON = true;
+      }
+      if (!Btn3SetON)
+      {            
+        screenNbr = 2;
+        Serial.println("Button3 Touched");        
+        Serial.println("Button3 set to ON");        
+        DrawBackground = true;        
+        Btn3SetON = true;              
+        if (Btn1SetON){
+          Btn1SetON = false;        
+        }
+        if (Btn2SetON){
+          Btn2SetON = false;       
+        }
+      }      
+    }
+  }
+  else{
+    initTouchTime = millis();
+    TouchLatch = false;    
+    buttonReleased = true;      
   }
 }
 
@@ -1578,105 +1784,23 @@ void stop_esp() {
     EEPROM.writeFloat(140, acc_regen);
     EEPROM.commit();
   }
+  
   tft.setTextFont(1);
   tft.setTextSize(2);
   tft.fillScreen(TFT_BLACK);
   tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 16);
   tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
   WiFi.disconnect();
+  Serial.println("Wifi Stopped");
   delay(1500);
   tft.fillScreen(TFT_BLACK);
   tft.drawString("OBD2", tft.width() / 2, tft.height() / 2 - 16);
   tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
-  ELM_PORT.end();
+  ELM_PORT.end();  
+  Serial.println("OBD2 Stopped");    
   delay(1500);
+  Serial.println("Going to Sleep");
   esp_deep_sleep_start();  
-}
-
-
-void SetupMode() {
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_WHITE, TFT_BLUE);
-  tft.setTextPadding(135);
-  //tft.drawRect(0, 0, 135, 59, TFT_BLUE); // Blue rectangle
-  tft.drawString("Stay On", tft.width() / 2, textLvl1, 1);
-  if (StayOn) {
-    tft.setTextColor(TFT_BLACK, TFT_GREEN);
-    tft.fillRect(1, 20, 134, 118, TFT_GREEN);
-    tft.setTextPadding(130);
-    tft.drawString("ON", tft.width() / 2, 80, 2);
-  } else {
-    tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.fillRect(1, 20, 134, 118, TFT_BLACK);
-    tft.setTextPadding(130);
-    tft.drawString("OFF", tft.width() / 2, 80, 2);
-  }
-}
-
-
-//--------------------------------------------------------------------------------------------
-//                   Draw Boxe objects Definition
-//--------------------------------------------------------------------------------------------
-
-
-void draw_warningbox_lvl1() {
-  tft.setTextColor(TFT_YELLOW, TFT_RED);
-  tft.fillRect(1, 18, 134, 58, TFT_RED);
-}
-
-void draw_warningbox_lvl2() {
-  tft.setTextColor(TFT_YELLOW, TFT_RED);
-  tft.fillRect(1, 78, 134, 118, TFT_RED);
-}
-
-void draw_warningbox_lvl3() {
-  tft.setTextColor(TFT_YELLOW, TFT_RED);
-  tft.fillRect(1, 138, 134, 178, TFT_RED);
-}
-
-void draw_warningbox_lvl4() {
-  tft.setTextColor(TFT_YELLOW, TFT_RED);
-  tft.fillRect(1, 198, 134, 234, TFT_RED);
-}
-
-void draw_normalbox_lvl1() {
-  //tft.setTextColor(TFT_GREEN,TFT_BLACK);
-  tft.fillRect(1, 19, 133, 59, TFT_BLACK);
-}
-
-void draw_normalbox_lvl2() {
-  //tft.setTextColor(TFT_GREEN,TFT_BLACK);
-  tft.fillRect(1, 79, 133, 119, TFT_BLACK);
-}
-
-void draw_normalbox_lvl3() {
-  //tft.setTextColor(TFT_GREEN,TFT_BLACK);
-  tft.fillRect(1, 139, 133, 179, TFT_BLACK);
-}
-
-void draw_normalbox_lvl4() {
-  //tft.setTextColor(TFT_GREEN,TFT_BLACK);
-  tft.fillRect(1, 199, 133, 239, TFT_BLACK);
-}
-
-void draw_greenbox_lvl1() {
-  tft.setTextColor(TFT_BLACK, TFT_GREEN);
-  tft.fillRect(1, 18, 134, 58, TFT_GREEN);
-}
-
-void draw_greenbox_lvl2() {
-  tft.setTextColor(TFT_BLACK, TFT_GREEN);
-  tft.fillRect(1, 78, 134, 118, TFT_GREEN);
-}
-
-void draw_greenbox_lvl3() {
-  tft.setTextColor(TFT_BLACK, TFT_GREEN);
-  tft.fillRect(1, 138, 134, 178, TFT_GREEN);
-}
-
-void draw_greenbox_lvl4() {
-  tft.setTextColor(TFT_BLACK, TFT_GREEN);
-  tft.fillRect(1, 198, 134, 234, TFT_GREEN);
 }
 
 //--------------------------------------------------------------------------------------------
@@ -1686,24 +1810,85 @@ void draw_greenbox_lvl4() {
 void DisplayPage() {
   if (DrawBackground) {
     tft.fillScreen(TFT_BLACK);
-    tft.setTextDatum(MC_DATUM);
-
-    tft.setFreeFont(&FreeSans9pt7b);
     tft.setTextSize(1);
+    tft.setFreeFont(&FreeSans12pt7b);
     tft.setTextColor(TFT_WHITE, TFT_BLUE);
-    tft.setTextPadding(135);
-    tft.drawString(title1, tft.width() / 2, textLvl1, 1);
-    tft.drawString(title2, tft.width() / 2, textLvl2, 1);
-    tft.drawString(title3, tft.width() / 2, textLvl3, 1);
-    tft.drawString(title4, tft.width() / 2, textLvl4, 1);
+    tft.setTextPadding(160);
+    tft.drawString(title1, tft.width() / 4, textLvl1, 1);
+    tft.drawString(title2, tft.width() / 4, textLvl2, 1);
+    tft.drawString(title3, tft.width() / 4, textLvl3, 1);
+    tft.drawString(title4, tft.width() / 4, textLvl4, 1);
+    tft.drawString(title5, tft.width() / 4, textLvl5, 1);
+    tft.drawString(title6, 3 * (tft.width() / 4), textLvl1, 1);
+    tft.drawString(title7, 3 * (tft.width() / 4), textLvl2, 1);
+    tft.drawString(title8, 3 * (tft.width() / 4), textLvl3, 1);
+    tft.drawString(title9, 3 * (tft.width() / 4), textLvl4, 1);
+    tft.drawString(title10, 3 * (tft.width() / 4), textLvl5, 1);
+
+    tft.drawLine(1,textLvl1 - 10,319,textLvl1 - 10,TFT_DARKGREY);
+    tft.drawLine(tft.width() / 2,textLvl1 - 10,tft.width() / 2,drawLvl5 + 24,TFT_DARKGREY);
+    tft.drawLine(1,drawLvl5 + 24,319,drawLvl5 + 24,TFT_DARKGREY);
 
     strcpy(prev_value1, "");
     strcpy(prev_value2, "");
     strcpy(prev_value3, "");
     strcpy(prev_value4, "");
-    DrawBackground = false;
-    tft.setFreeFont(&FreeSans24pt7b);
+    strcpy(prev_value5, "");
+    strcpy(prev_value6, "");
+    strcpy(prev_value7, "");
+    strcpy(prev_value8, "");
+    strcpy(prev_value9, "");
+    strcpy(prev_value10, "");
+    
+    switch (screenNbr) {  // button select to display
+      
+      case 0: 
+        tft.setFreeFont(&FreeSans9pt7b);        
+        drawRoundedRect(btnAgreen);      
+        drawRoundedRect(btnBred);
+        drawRoundedRect(btnCred);
+        tft.setFreeFont(&FreeSans18pt7b);
+        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        strcpy(MainTitle, "Consommation");        
+        tft.drawString(MainTitle, tft.width() / 2, 22, 1); 
+        break; 
+         
+      case 1: 
+        tft.setFreeFont(&FreeSans9pt7b);        
+        drawRoundedRect(btnAred);      
+        drawRoundedRect(btnBgreen);
+        drawRoundedRect(btnCred);
+        tft.setFreeFont(&FreeSans18pt7b);
+        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        strcpy(MainTitle, "Batt. Info");        
+        tft.drawString(MainTitle, tft.width() / 2, 22, 1); 
+        break;
+        
+      case 2: 
+        tft.setFreeFont(&FreeSans9pt7b);        
+        drawRoundedRect(btnAred);      
+        drawRoundedRect(btnBred);
+        drawRoundedRect(btnCgreen);
+        tft.setFreeFont(&FreeSans18pt7b);
+        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        strcpy(MainTitle, "Puissance");        
+        tft.drawString(MainTitle, tft.width() / 2, 22, 1); 
+        break;
+
+      case 3: 
+        tft.setFreeFont(&FreeSans9pt7b);        
+        drawRoundedRect(btnAred);      
+        drawRoundedRect(btnBred);
+        drawRoundedRect(btnCred);
+        tft.setFreeFont(&FreeSans18pt7b);
+        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        strcpy(MainTitle, "Setup");        
+        tft.drawString(MainTitle, tft.width() / 2, 22, 1); 
+        break;
+    }
+    DrawBackground = false;    
   }
+  tft.setFreeFont(&FreeSans18pt7b);
 
   if (value1_float < 0) {
     value1_float = abs(value1_float);
@@ -1729,59 +1914,173 @@ void DisplayPage() {
   } else {
     negative_flag4 = false;
   }
+  if (value5_float < 0) {
+    value5_float = abs(value5_float);
+    negative_flag5 = true;
+  } else {
+    negative_flag5 = false;
+  }
+  if (value6_float < 0) {
+    value6_float = abs(value6_float);
+    negative_flag6 = true;
+  } else {
+    negative_flag6 = false;
+  }
+  if (value7_float < 0) {
+    value7_float = abs(value7_float);
+    negative_flag7 = true;
+  } else {
+    negative_flag7 = false;
+  }
+  if (value8_float < 0) {
+    value8_float = abs(value8_float);
+    negative_flag8 = true;
+  } else {
+    negative_flag8 = false;
+  }
+  if (value9_float < 0) {
+    value9_float = abs(value9_float);
+    negative_flag9 = true;
+  } else {
+    negative_flag9 = false;
+  }
+  if (value10_float < 0) {
+    value10_float = abs(value10_float);
+    negative_flag10 = true;
+  } else {
+    negative_flag10 = false;
+  }
 
   dtostrf(value1_float, 3, nbr_decimal1, value1);
   dtostrf(value2_float, 3, nbr_decimal2, value2);
   dtostrf(value3_float, 3, nbr_decimal3, value3);
   dtostrf(value4_float, 3, nbr_decimal4, value4);
+  dtostrf(value5_float, 3, nbr_decimal5, value5);
+  dtostrf(value6_float, 3, nbr_decimal6, value6);
+  dtostrf(value7_float, 3, nbr_decimal7, value7);
+  dtostrf(value8_float, 3, nbr_decimal8, value8);
+  dtostrf(value9_float, 3, nbr_decimal9, value9);
+  dtostrf(value10_float, 3, nbr_decimal10, value10);
 
   if (value1 != prev_value1) {
     tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value1, tft.width() / 2, drawLvl1, 1);
+    tft.drawString(prev_value1, tft.width() / 4, drawLvl1, 1);
     if (negative_flag1) {
       tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value1, tft.width() / 2, drawLvl1, 1);
+      tft.drawString(value1, tft.width() / 4, drawLvl1, 1);
     } else {
       tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value1, tft.width() / 2, drawLvl1, 1);
+      tft.drawString(value1, tft.width() / 4, drawLvl1, 1);
     }
     strcpy(prev_value1, value1);
   }
   if (value2 != prev_value2) {
     tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value2, tft.width() / 2, drawLvl2, 1);
+    tft.drawString(prev_value2, tft.width() / 4, drawLvl2, 1);
     if (negative_flag2) {
       tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value2, tft.width() / 2, drawLvl2, 1);
+      tft.drawString(value2, tft.width() / 4, drawLvl2, 1);
     } else {
       tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value2, tft.width() / 2, drawLvl2, 1);
+      tft.drawString(value2, tft.width() / 4, drawLvl2, 1);
     }
     strcpy(prev_value2, value2);
   }
   if (value3 != prev_value3) {
     tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value3, tft.width() / 2, drawLvl3, 1);
+    tft.drawString(prev_value3, tft.width() / 4, drawLvl3, 1);
     if (negative_flag3) {
       tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value3, tft.width() / 2, drawLvl3, 1);
+      tft.drawString(value3, tft.width() / 4, drawLvl3, 1);
     } else {
       tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value3, tft.width() / 2, drawLvl3, 1);
+      tft.drawString(value3, tft.width() / 4, drawLvl3, 1);
     }
     strcpy(prev_value3, value3);
   }
   if (value4 != prev_value4) {
     tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value4, tft.width() / 2, drawLvl4, 1);
+    tft.drawString(prev_value4, tft.width() / 4, drawLvl4, 1);
     if (negative_flag4) {
       tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value4, tft.width() / 2, drawLvl4, 1);
+      tft.drawString(value4, tft.width() / 4, drawLvl4, 1);
     } else {
       tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value4, tft.width() / 2, drawLvl4, 1);
+      tft.drawString(value4, tft.width() / 4, drawLvl4, 1);
     }
     strcpy(prev_value4, value4);
+  }
+  if (value5 != prev_value5) {
+    tft.setTextColor(TFT_BLACK, TFT_BLACK);
+    tft.drawString(prev_value5, tft.width() / 4, drawLvl5, 1);
+    if (negative_flag5) {
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+      tft.drawString(value5, tft.width() / 4, drawLvl5, 1);
+    } else {
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.drawString(value5, tft.width() / 4, drawLvl5, 1);
+    }
+    strcpy(prev_value5, value5);
+  }
+  if (value6 != prev_value6) {
+    tft.setTextColor(TFT_BLACK, TFT_BLACK);
+    tft.drawString(prev_value6, 3 * (tft.width() / 4), drawLvl1, 1);
+    if (negative_flag6) {
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+      tft.drawString(value6, 3 * (tft.width() / 4), drawLvl1, 1);
+    } else {
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.drawString(value6, 3 * (tft.width() / 4), drawLvl1, 1);
+    }
+    strcpy(prev_value6, value6);
+  }
+  if (value7 != prev_value7) {
+    tft.setTextColor(TFT_BLACK, TFT_BLACK);
+    tft.drawString(prev_value7, 3 * (tft.width() / 4), drawLvl2, 1);
+    if (negative_flag7) {
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+      tft.drawString(value7, 3 * (tft.width() / 4), drawLvl2, 1);
+    } else {
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.drawString(value7, 3 * (tft.width() / 4), drawLvl2, 1);
+    }
+    strcpy(prev_value7, value7);
+  }
+  if (value8 != prev_value8) {
+    tft.setTextColor(TFT_BLACK, TFT_BLACK);
+    tft.drawString(prev_value8, 3 * (tft.width() / 4), drawLvl3, 1);
+    if (negative_flag8) {
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+      tft.drawString(value8, 3 * (tft.width() / 4), drawLvl3, 1);
+    } else {
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.drawString(value8, 3 * (tft.width() / 4), drawLvl3, 1);
+    }
+    strcpy(prev_value8, value8);
+  }
+  if (value9 != prev_value9) {
+    tft.setTextColor(TFT_BLACK, TFT_BLACK);
+    tft.drawString(prev_value9, 3 * (tft.width() / 4), drawLvl4, 1);
+    if (negative_flag9) {
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+      tft.drawString(value9, 3 * (tft.width() / 4), drawLvl4, 1);
+    } else {
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.drawString(value9, 3 * (tft.width() / 4), drawLvl4, 1);
+    }
+    strcpy(prev_value9, value9);
+  }
+  if (value10 != prev_value10) {
+    tft.setTextColor(TFT_BLACK, TFT_BLACK);
+    tft.drawString(prev_value10, 3 * (tft.width() / 4), drawLvl5, 1);
+    if (negative_flag10) {
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+      tft.drawString(value10, 3 * (tft.width() / 4), drawLvl5, 1);
+    } else {
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.drawString(value10, 3 * (tft.width() / 4), drawLvl5, 1);
+    }
+    strcpy(prev_value10, value10);
   }
 }
 //-------------------------------------------------------------------------------------
@@ -1791,14 +2090,27 @@ void DisplayPage() {
 /*///////////////// Display Page 1 //////////////////////*/
 void page1() {
 
-  strcpy(title1, "TripOdo");
-  strcpy(title2, "PIDkWh_100");
-  strcpy(title3, "Est_range");
-  strcpy(title4, "EstLeft_kWh");
-  value1_float = TripOdo;
+  strcpy(title1,"SoC");
+  strcpy(title2,"PIDkWh_100");
+  strcpy(title3,"kWh/100km");
+  strcpy(title4,"10Km_kWh");
+  strcpy(title5,"EstLeft_kWh");
+  strcpy(title6,"TripOdo");  
+  strcpy(title7,"Est_range");
+  strcpy(title8,"Est_range");  
+  strcpy(title9,"Est_range");
+  strcpy(title10,"used_kwh");
+  value1_float = SoC;  
   value2_float = PIDkWh_100;
-  value3_float = Est_range3;
-  value4_float = EstLeft_kWh;
+  value3_float = kWh_100km;
+  value4_float = span_kWh_100km;
+  value5_float = EstLeft_kWh;  
+  value6_float = TripOdo;
+  value7_float = Est_range3;
+  value8_float = Est_range;
+  value9_float = Est_range2;
+  value10_float = used_kwh;
+  
   if (value1_float >= 100) {
     nbr_decimal1 = 0;
   } else {
@@ -1818,6 +2130,36 @@ void page1() {
     nbr_decimal4 = 0;
   } else {
     nbr_decimal4 = 1;
+  }
+  if (value5_float >= 100) {
+    nbr_decimal5 = 0;
+  } else {
+    nbr_decimal5 = 1;
+  }
+  if (value6_float >= 100) {
+    nbr_decimal6 = 0;
+  } else {
+    nbr_decimal6 = 1;
+  }
+  if (value7_float >= 100) {
+    nbr_decimal7 = 0;
+  } else {
+    nbr_decimal7 = 1;
+  }
+  if (value8_float >= 100) {
+    nbr_decimal8 = 0;
+  } else {
+    nbr_decimal8 = 1;
+  }
+  if (value9_float >= 100) {
+    nbr_decimal9 = 0;
+  } else {
+    nbr_decimal9 = 1;
+  }
+  if (value10_float >= 100) {
+    nbr_decimal10 = 0;
+  } else {
+    nbr_decimal10 = 1;
   }
 
   DisplayPage();
@@ -1827,14 +2169,26 @@ void page1() {
 /*///////////////// Display Page 2 //////////////////////*/
 void page2() {
 
-  strcpy(title1, "kWh/100km");
-  strcpy(title2, "Est_range");
-  strcpy(title3, "10Km_kWh");
-  strcpy(title4, "Est_range");
-  value1_float = kWh_100km;
-  value2_float = Est_range;
-  value3_float = span_kWh_100km;
-  value4_float = Est_range2;
+  strcpy(title1, "SoC");
+  strcpy(title2, "MIN_Temp");
+  strcpy(title3, "MAXcellv");
+  strcpy(title4, "SOH");
+  strcpy(title5, "Full_Ah");
+  strcpy(title6, "BmsSoC");
+  strcpy(title7, "MAX_Temp");
+  strcpy(title8, "CellVdiff");
+  strcpy(title9, "Det_Total");
+  strcpy(title10, "12V_SoC");
+  value1_float = SoC;
+  value2_float = BattMinT;
+  value3_float = MAXcellv;
+  value4_float = SOH;
+  value5_float = EstFull_Ah;
+  value6_float = BmsSoC;
+  value7_float = BattMaxT;
+  value8_float = CellVdiff;
+  value9_float = Deter_Min;
+  value10_float = AuxBattSoC;
   if (value1_float >= 100) {
     nbr_decimal1 = 0;
   } else {
@@ -1854,6 +2208,36 @@ void page2() {
     nbr_decimal4 = 0;
   } else {
     nbr_decimal4 = 1;
+  }
+  if (value5_float >= 100) {
+    nbr_decimal5 = 0;
+  } else {
+    nbr_decimal5 = 1;
+  }
+  if (value6_float >= 100) {
+    nbr_decimal6 = 0;
+  } else {
+    nbr_decimal6 = 1;
+  }
+  if (value7_float >= 100) {
+    nbr_decimal7 = 0;
+  } else {
+    nbr_decimal7 = 1;
+  }
+  if (value8_float >= 100) {
+    nbr_decimal8 = 0;
+  } else {
+    nbr_decimal8 = 2;
+  }
+  if (value9_float >= 100) {
+    nbr_decimal9 = 0;
+  } else {
+    nbr_decimal9 = 1;
+  }
+  if (value10_float >= 100) {
+    nbr_decimal10 = 0;
+  } else {
+    nbr_decimal10 = 1;
   }
 
   DisplayPage();
@@ -1863,14 +2247,27 @@ void page2() {
 /*///////////////// Display Page 3 //////////////////////*/
 void page3() {
 
-  strcpy(title1, "Calc_Used");
-  strcpy(title2, "Calc_Left");
+  strcpy(title1, "Power");
+  strcpy(title2, "MIN_Temp");
   strcpy(title3, "PID_kWh");
-  strcpy(title4, "Int_Energ");
-  value1_float = used_kwh;
-  value2_float = left_kwh;
+  strcpy(title4, "Calc_Used");
+  strcpy(title5, "SoC");
+  strcpy(title6, "Max_Pwr");
+  strcpy(title7, "MAX_Temp");
+  strcpy(title8, "Int_Energ");
+  strcpy(title9, "Calc_Left");
+  strcpy(title10, "Heater");  
+  value1_float = Power;
+  value2_float = BattMinT;
   value3_float = Net_kWh;
-  value4_float = acc_energy;
+  value4_float = used_kwh;
+  value5_float = SoC;
+  value6_float = Max_Pwr;
+  value7_float = BattMaxT;
+  value8_float = acc_energy;
+  value9_float = left_kwh;
+  value10_float = Heater;
+  
   if (value1_float >= 100) {
     nbr_decimal1 = 0;
   } else {
@@ -1890,6 +2287,36 @@ void page3() {
     nbr_decimal4 = 0;
   } else {
     nbr_decimal4 = 1;
+  }
+  if (value5_float >= 100) {
+    nbr_decimal5 = 0;
+  } else {
+    nbr_decimal5 = 1;
+  }
+  if (value6_float >= 100) {
+    nbr_decimal6 = 0;
+  } else {
+    nbr_decimal6 = 1;
+  }
+  if (value7_float >= 100) {
+    nbr_decimal7 = 0;
+  } else {
+    nbr_decimal7 = 1;
+  }
+  if (value8_float >= 100) {
+    nbr_decimal8 = 0;
+  } else {
+    nbr_decimal8 = 1;
+  }
+  if (value9_float >= 100) {
+    nbr_decimal9 = 0;
+  } else {
+    nbr_decimal9 = 1;
+  }
+  if (value10_float >= 100) {
+    nbr_decimal10 = 0;
+  } else {
+    nbr_decimal10 = 1;
   }
 
   DisplayPage();
@@ -1934,116 +2361,6 @@ void page4() {
 }
 /*///////////////// End of Display Page 4 //////////////////////*/
 
-/*///////////////// Display Page 5 //////////////////////*/
-void page5() {
-
-  strcpy(title1, "Max_Pwr");
-  strcpy(title2, "Power");
-  strcpy(title3, "MAX_Temp");
-  strcpy(title4, "SoC");
-  value1_float = Max_Pwr;
-  value2_float = Power;
-  value3_float = BattMinT;
-  value4_float = SoC;
-  if (value1_float >= 100) {
-    nbr_decimal1 = 0;
-  } else {
-    nbr_decimal1 = 1;
-  }
-  if (value2_float >= 100) {
-    nbr_decimal2 = 0;
-  } else {
-    nbr_decimal2 = 1;
-  }
-  if (value3_float >= 100) {
-    nbr_decimal3 = 0;
-  } else {
-    nbr_decimal3 = 1;
-  }
-  if (value4_float >= 100) {
-    nbr_decimal4 = 0;
-  } else {
-    nbr_decimal4 = 1;
-  }
-
-  DisplayPage();
-}
-/*///////////////// End of Display Page 5 //////////////////////*/
-
-/*///////////////// Display Page 6 //////////////////////*/
-void page6() {
-
-  strcpy(title1, "BmsSoC");
-  strcpy(title2, "CellVdiff");
-  strcpy(title3, "MAXcellv");
-  strcpy(title4, "12V_SoC");
-  value1_float = BmsSoC;
-  value2_float = CellVdiff;
-  value3_float = MAXcellv;
-  value4_float = AuxBattSoC;
-  if (value1_float >= 100) {
-    nbr_decimal1 = 0;
-  } else {
-    nbr_decimal1 = 1;
-  }
-  if (value2_float >= 100) {
-    nbr_decimal2 = 0;
-  } else {
-    nbr_decimal2 = 2;
-  }
-  if (value3_float >= 100) {
-    nbr_decimal3 = 0;
-  } else {
-    nbr_decimal3 = 2;
-  }
-  if (value4_float >= 100) {
-    nbr_decimal4 = 0;
-  } else {
-    nbr_decimal4 = 1;
-  }
-
-  DisplayPage();
-}
-/*///////////////// End of Display Page 6 //////////////////////*/
-
-/*///////////////// Display Page 7 //////////////////////*/
-void page7() {
-
-  strcpy(title1, "Full_Ah");
-  strcpy(title2, "Deter_Min");
-  strcpy(title3, "MaxDetNb");
-  strcpy(title4, "SOH");
-  value1_float = EstFull_Ah;
-  value2_float = Deter_Min;
-  value3_float = MaxDetNb;
-  value4_float = SOH;
-  if (value1_float >= 100) {
-    nbr_decimal1 = 0;
-  } else {
-    nbr_decimal1 = 0;
-  }
-  if (value2_float >= 100) {
-    nbr_decimal2 = 0;
-  } else {
-    nbr_decimal2 = 2;
-  }
-  if (value3_float >= 100) {
-    nbr_decimal3 = 0;
-  } else {
-    nbr_decimal3 = 0;
-  }
-  if (value4_float >= 100) {
-    nbr_decimal4 = 0;
-  } else {
-    nbr_decimal4 = 1;
-  }
-
-  DisplayPage();
-}
-/*///////////////// End of Display Page 7 //////////////////////*/
-
-
-
 /*///////////////////////////////////////////////////////////////////////*/
 /*                     START OF LOOP                                     */
 /*///////////////////////////////////////////////////////////////////////*/
@@ -2051,10 +2368,10 @@ void page7() {
 void loop() {
 
   loop_count += 1;
-  ButtonLoop();
+  //ButtonLoop();
 
   currentTimer = millis();
-  if (currentTimer - previousTimer >= sendInterval) {
+  if (currentTimer - previousTimer >= sendInterval) {    
     send_data = true;  // This will trigger logic to send data to Google sheet
     previousTimer = currentTimer;
     if (!send_enabled) {
@@ -2062,30 +2379,42 @@ void loop() {
     }
   }
 
+  if (datasent){
+    tft.fillCircle(20, 20, 6,TFT_GREEN);
+    datasent = false;
+  }
+  else{
+    tft.fillCircle(20, 20, 6,TFT_BLACK);
+  }
+
 
   /*/////// Read each OBDII PIDs /////////////////*/
 
+  button();
+    
   read_data();
 
   /*/////// Display Page Number /////////////////*/
 
   if (!SetupOn && (ESP_on || (Power < 0))) {
 
-  switch (screenNbr) {  // select page to display
-    case 0: page1(); break;
-    case 1: page2(); break;
-    case 2: page3(); break;
-    case 3: page4(); break;
-    case 4: page5(); break;
-    case 5: page6(); break;
-    case 6: page7(); break;
+    if (WiFi.status() == WL_CONNECTED){
+        tft.fillCircle(300, 20, 6,TFT_GREEN);
+      }
+    else{
+      tft.fillCircle(300, 20, 6,TFT_RED);
+    }
+        
+    switch (screenNbr) {  // select page to display
+      case 0: page1(); break;
+      case 1: page2(); break;
+      case 2: page3(); break;
+      case 3: page4(); break;    
+    }
   }
-  //}
   /*/////// Display Setup Page/////////////////*/
   else {
-    if (ESP_on) {
-      SetupMode();
-    }
+    page1();
   }
 
   /*/////// Stop ESP /////////////////*/
@@ -2106,7 +2435,7 @@ void loop() {
 
   }
 
-  else if (!BMS_ign && (Power >= 0) && !StayOn && data_ready) {  // When the car is off but the BMS does some maintnance check, wait 30 mins before esp32 power down
+  else if (!BMS_ign && (Power >= 0) && !StayOn && data_ready) {  // When the car is off but the BMS does some maintnance check, wait 20 mins before esp32 power down
     if (!SoC_saved) {
       ESPinitTimer = millis();
       mem_SoC = SoC;
@@ -2135,7 +2464,8 @@ void loop() {
     }
   }
 
-  if ((WiFi.status() != WL_CONNECTED) && BMS_ign && !wifiReconn) {  // If esp32 is On when start the car, reconnect wifi if not connected
+  if ((WiFi.status() != WL_CONNECTED) && BMS_ign && !wifiReconn && StartWifi) {  // If esp32 is On when start the car, reconnect wifi if not connected    
+    tft.setFreeFont(&FreeSans9pt7b);
     ConnectWifi(tft);
     wifiReconn = true;
     if (WiFi.status() == WL_CONNECTED) {
