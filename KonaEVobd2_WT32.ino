@@ -16,7 +16,6 @@
 #include "SafeString.h"
 #include "ELMduino.h"
 #include "EEPROM.h"
-#include "Button.h"
 #include <SPI.h>
 #include <TFT_eSPI.h>
 #include "BT_communication.h"
@@ -25,37 +24,28 @@
 #include "WiFi.h"
 #include "Free_Fonts.h"
 #include <Adafruit_FT6206.h>
-//#include "Button_Select.h"
 
 #define DEBUG_PORT Serial
 
 TaskHandle_t Task1;
-//TaskHandle_t Task2;
 
 TFT_eSPI tft = TFT_eSPI();
 Adafruit_FT6206 ts = Adafruit_FT6206();
 
+#define Threshold 40 /* threshold for touch wakeup - Greater the value[, more the sensitivity */
+
+int ledBacklight = 80; // Initial TFT backlight intensity on a scale of 0 to 255. Initial value is 80.
+
+/*////// Setting PWM properties, do not change this! /////////*/
+const int pwmFreq = 5000;
+const int pwmResolution = 8;
+const int pwmLedChannelTFT = 0;
+
+//RTC_DATA_ATTR int bootCount = 0;
+
 //TFT y positions for texts and numbers
-#define textLvl1 70  // y coordinates for text
-#define textLvl2 140
-#define textLvl3 210
-#define textLvl4 280
-#define textLvl5 350
-#define drawLvl1 105  // and numbers
-#define drawLvl2 175
-#define drawLvl3 245
-#define drawLvl4 315
-#define drawLvl5 385  // TTGO 320x480 TFT display
-
-//#define BUTTON_PIN 0
-//#define BUTTON_2_PIN 35
-#define Threshold 40 /* Greater the value, more the sensitivity */
-
-RTC_DATA_ATTR int bootCount = 0;
-touch_pad_t touchPin;
-
-//Button bouton(BUTTON_PIN);
-//Button bouton2(BUTTON_2_PIN);
+float textLvl[10] = {70, 140, 210, 280, 350, 70, 140, 210, 280, 350};  // y coordinates for text
+float drawLvl[10] = {105, 175, 245, 315, 385, 105, 175, 245, 315, 385}; // and numbers
 
 #define pagenumbers 7  // number of pages to display
 #define N_km 10        //variable for the calculating kWh/100km over a N_km
@@ -82,6 +72,7 @@ bool SoC_saved = false;
 bool code_received = false;
 bool shutdown_esp = false;
 bool wifiReconn = false;
+bool datasent = false;
 
 float BattMinT;
 float BattMaxT;
@@ -241,70 +232,14 @@ bool kWh_update = false;
 bool corr_update = false;
 bool ESP_on = false;
 bool DrawBackground = true;
-char title1[12];
-char title2[12];
-char title3[12];
-char title4[12];
-char title5[12];
-char title6[12];
-char title7[12];
-char title8[12];
-char title9[12];
-char title10[12];
-char value1[5];
-char value2[5];
-char value3[5];
-char value4[5];
-char value5[5];
-char value6[5];
-char value7[5];
-char value8[5];
-char value9[5];
-char value10[5];
-char prev_value1[5];
-char prev_value2[5];
-char prev_value3[5];
-char prev_value4[5];
-char prev_value5[5];
-char prev_value6[5];
-char prev_value7[5];
-char prev_value8[5];
-char prev_value9[5];
-char prev_value10[5];
-bool negative_flag1;
-bool negative_flag2;
-bool negative_flag3;
-bool negative_flag4;
-bool negative_flag5;
-bool negative_flag6;
-bool negative_flag7;
-bool negative_flag8;
-bool negative_flag9;
-bool negative_flag10;
-float value1_float;
-float value2_float;
-float value3_float;
-float value4_float;
-float value5_float;
-float value6_float;
-float value7_float;
-float value8_float;
-float value9_float;
-float value10_float;
-int nbr_decimal1;
-int nbr_decimal2;
-int nbr_decimal3;
-int nbr_decimal4;
-int nbr_decimal5;
-int nbr_decimal6;
-int nbr_decimal7;
-int nbr_decimal8;
-int nbr_decimal9;
-int nbr_decimal10;
+char titre[10][12];
+char value[10][5];
+char prev_value[10][5];
+bool negative_flag[10];
+float value_float[10];
+int nbr_decimal[10];
 bool Charge_page = false;
 bool Power_page = false;
-
-bool datasent = false;
 
 // Variables for touch x,y
 static int32_t x, y;
@@ -313,14 +248,14 @@ static int xMargin = 20, yMargin = 420, margin = 20, btnWidth = 80, btnHeigth = 
 char* BtnAtext = "MAIN";
 char* BtnBtext = "BATT";
 char* BtnCtext = "POWER";
-char MainTitle[12];
+char Maintitre[][13] = {"Consommation", "Batt. Info", "Puissance", "Set-Up"};
+uint16_t MainTitleColor = TFT_DARKGREY;
+uint16_t BtnOnColor = TFT_GOLD;
+uint16_t BtnOffColor = TFT_LIGHTGREY;
 
 unsigned long initTouchTime = 0;
 unsigned long TouchTime = 0;
 bool TouchLatch = false;
-bool Btn1Clicked = false;
-bool Btn2Clicked = false;
-bool Btn3Clicked = false;
 bool Btn1SetON = true;
 bool Btn2SetON = false;
 bool Btn3SetON = false;
@@ -336,63 +271,63 @@ struct RoundedRect {
   char* BtnText;
 };
 
-RoundedRect btnAgreen = {
+RoundedRect btnAon = {
   xMargin,
   yMargin,
   btnWidth,
   btnHeigth,
   4,
-  TFT_GREEN,
+  BtnOnColor,
   BtnAtext
 };
 
-RoundedRect btnBgreen = {
-  btnAgreen.xStart + btnAgreen.xWidth + margin,
+RoundedRect btnBon = {
+  btnAon.xStart + btnAon.xWidth + margin,
   yMargin,
   btnWidth,
   btnHeigth,
   4,
-  TFT_GREEN,
+  BtnOnColor,
   BtnBtext
 };
 
-RoundedRect btnCgreen = {
-  btnBgreen.xStart + btnBgreen.xWidth + margin,
+RoundedRect btnCon = {
+  btnBon.xStart + btnBon.xWidth + margin,
   yMargin,
   btnWidth,
   btnHeigth,
   4,
-  TFT_GREEN,
+  BtnOnColor,
   BtnCtext
 };
 
-RoundedRect btnAred = {
+RoundedRect btnAoff = {
   xMargin,
   yMargin,
   btnWidth,
   btnHeigth,
   4,
-  TFT_WHITE,
+  BtnOffColor,
   BtnAtext
 };
 
-RoundedRect btnBred = {
-  btnAred.xStart + btnAred.xWidth + margin,
+RoundedRect btnBoff = {
+  btnAoff.xStart + btnAoff.xWidth + margin,
   yMargin,
   btnWidth,
   btnHeigth,
   4,
-  TFT_WHITE,
+  BtnOffColor,
   BtnBtext
 };
 
-RoundedRect btnCred = {
-  btnBred.xStart + btnBred.xWidth + margin,
+RoundedRect btnCoff = {
+  btnBoff.xStart + btnBoff.xWidth + margin,
   yMargin,
   btnWidth,
   btnHeigth,
   4,
-  TFT_WHITE,
+  BtnOffColor,
   BtnCtext
 };
 
@@ -431,7 +366,7 @@ struct dataFrames_struct {
 typedef struct dataFrames_struct dataFrames;  // create a simple name for this type of data
 dataFrames results;                           // this struct will hold the results
 
-void callback(){
+void callback(){  //required function for touch wake
   //placeholder callback function
 }
 
@@ -447,28 +382,33 @@ void setup() {
 
   Serial.begin(115200);
 
-  // Pins 18/19 are SDA/SCL for touch sensor on this device
-  // 40 is a touch threshold
-  if (!ts.begin(18, 19, 40)) {
-    Serial.println("Couldn't start touchscreen controller");
-    while (true);
-  }
-  tft.init();
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, 128);
-
-  
-
   while (!Serial) {
     ;  // wait for serial port to connect. Needed for native USB port only
   }
 
   Serial.println("Serial Monitor - STARTED");
 
-
-  //pinMode(VESSoff, OUTPUT); // enable output pin that activate a relay to temporary disable the VESS
-
+  /*//////////////Initialise Touch screen ////////////////*/
+  // Pins 18/19 are SDA/SCL for touch sensor on this device
+  // 40 is a touch threshold
+  if (!ts.begin(18, 19, 40)) {
+    Serial.println("Couldn't start touchscreen controller");
+    while (true);
+  }
+  
   /*//////////////Initialise OLED display ////////////////*/
+  tft.init();
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, 128);
+
+  Serial.print("Configuring PWM for TFT backlight... ");
+  ledcSetup(pwmLedChannelTFT, pwmFreq, pwmResolution);
+  ledcAttachPin(TFT_BL, pwmLedChannelTFT);
+  Serial.println("DONE");
+
+  Serial.print("Setting PWM for TFT backlight to default intensity... ");
+  ledcWrite(pwmLedChannelTFT, ledBacklight);
+  Serial.println("DONE");
 
   tft.begin();
   tft.setRotation(0);  // 0 & 2 Portrait. 1 & 3 landscape
@@ -477,7 +417,9 @@ void setup() {
   tft.setCursor(0, 0);
   tft.setTextDatum(MC_DATUM);
   tft.setTextSize(2);
-  tft.setFreeFont(&FreeSans9pt7b);
+  tft.setFreeFont(&FreeSans9pt7b);   
+
+  //pinMode(VESSoff, OUTPUT); // enable output pin that activate a relay to temporary disable the VESS
 
   /*////// initialize EEPROM with predefined size ////////*/
   EEPROM.begin(148);
@@ -486,17 +428,16 @@ void setup() {
   //SafeString::setOutput(Serial);
   
   //Increment boot number and print it every reboot
-  ++bootCount;
-  Serial.println("Boot number: " + String(bootCount));
+  //++bootCount;
+  //Serial.println("Boot number: " + String(bootCount));
 
   //Setup interrupt on Touch Pad 2 (GPIO2)
   touchAttachInterrupt(T2, callback, Threshold);
 
   //Configure Touchpad as wakeup source
-  esp_sleep_enable_touchpad_wakeup();
-  //esp_sleep_enable_ext0_wakeup(GPIO_NUM_19,0);  // initialize ESP wakeup on button 1 activation
+  esp_sleep_enable_touchpad_wakeup(); // initialize ESP wakeup on Touch activation  
 
-  /*////// Get the stored values from last re-initialisation /////*/
+  /*////// Get the stored value from last re-initialisation /////*/
 
   Net_kWh = EEPROM.readFloat(0);
   InitCED = EEPROM.readFloat(4);
@@ -542,7 +483,6 @@ void setup() {
   /*/////////////////////////////////////////////////////////////////*/
 
   ConnectToOBD2(tft);
-
 
   /*/////////////////////////////////////////////////////////////////*/
   /*                     CONNECTION TO WIFI                         */
@@ -645,7 +585,7 @@ int convertToInt(char* dataFrame, size_t startByte, size_t numberBytes) {
 //------------------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------------------
-//         Data retreived from OBD2 and extract values of it
+//         Data retreived from OBD2 and extract value of it
 //------------------------------------------------------------------------------------------
 
 void read_data() {
@@ -669,13 +609,13 @@ void read_data() {
     processPayload(payload, payloadLen, results);
 
     int BattMinTraw = convertToInt(results.frames[2], 6, 1);  //specify frame#, starting Byte(o in TorquePro) and # of bytes required
-    if (BattMinTraw > 127) {                                  //conversition for negative value
+    if (BattMinTraw > 127) {                                  //conversition for negative value[
       BattMinT = -1 * (256 - BattMinTraw);
     } else {
       BattMinT = BattMinTraw;
     }
     int BattMaxTraw = convertToInt(results.frames[2], 5, 1);  //specify frame#, starting Byte(o in TorquePro) and # of bytes required
-    if (BattMaxTraw > 127) {                                  //conversition for negative value
+    if (BattMaxTraw > 127) {                                  //conversition for negative value[
       BattMaxT = -1 * (256 - BattMaxTraw);
     } else {
       BattMaxT = BattMaxTraw;
@@ -684,7 +624,7 @@ void read_data() {
     BATTv = convertToInt(results.frames[2], 3, 2) * 0.1;
     int CurrentByte1 = convertToInt(results.frames[2], 1, 1);
     int CurrentByte2 = convertToInt(results.frames[2], 2, 1);
-    if (CurrentByte1 > 127) {  // the most significant bit is the sign bit so need to calculate commplement value if true
+    if (CurrentByte1 > 127) {  // the most significant bit is the sign bit so need to calculate commplement value[ if true
       BATTc = -1 * (((255 - CurrentByte1) * 256) + (256 - CurrentByte2)) * 0.1;
     } else {
       BATTc = ((CurrentByte1 * 256) + CurrentByte2) * 0.1;
@@ -730,7 +670,7 @@ void read_data() {
         MinDetNb = convertToInt(results.frames[4], 7, 1);
         Deter_Min = convertToInt(results.frames[4], 5, 2) * 0.1;
         int HeaterRaw = convertToInt(results.frames[3], 7, 1);
-        if (HeaterRaw > 127) {  //conversition for negative value
+        if (HeaterRaw > 127) {  //conversition for negative value[
           Heater = -1 * (256 - HeaterRaw);
         } else {
           Heater = HeaterRaw;
@@ -749,7 +689,7 @@ void read_data() {
 
         processPayload(payload, payloadLen, results);
         int COOLtempRaw = convertToInt(results.frames[1], 2, 1) * 0.01;  // Cooling water temperature
-        if (COOLtempRaw > 127) {                                         //conversition for negative value
+        if (COOLtempRaw > 127) {                                         //conversition for negative value[
           COOLtemp = -1 * (256 - COOLtempRaw);
         } else {
           COOLtemp = COOLtempRaw;
@@ -794,7 +734,7 @@ void read_data() {
         //AuxBattV = convertToInt(results.frames[3], 2, 2)* 0.001; //doesn't work...
         int AuxCurrByte1 = convertToInt(results.frames[3], 4, 1);
         int AuxCurrByte2 = convertToInt(results.frames[3], 5, 1);
-        if (AuxCurrByte1 > 127) {  // the most significant bit is the sign bit so need to calculate commplement value if true
+        if (AuxCurrByte1 > 127) {  // the most significant bit is the sign bit so need to calculate commplement value[ if true
           AuxBattC = -1 * (((255 - AuxCurrByte1) * 256) + (256 - AuxCurrByte2)) * 0.01;
         } else {
           AuxBattC = ((AuxCurrByte1 * 256) + AuxCurrByte2) * 0.01;
@@ -863,7 +803,7 @@ void read_data() {
         TireRR_T = convertToInt(results.frames[2], 4, 1) - 50;
       }
       pid_counter = 0;
-      data_ready = true;  // after all PIDs have been read, turn on flag for valid values from OBD2
+      data_ready = true;  // after all PIDs have been read, turn on flag for valid value from OBD2
       break;
   }
 
@@ -875,7 +815,7 @@ void read_data() {
   Integrat_current();
   integrate_timer = millis();
 
-  if (!ResetOn) {  // On power On, wait for current trip values to be re-initialized before executing the next lines of code
+  if (!ResetOn) {  // On power On, wait for current trip value to be re-initialized before executing the next lines of code
     TripOdo = Odometer - InitOdo;
 
     CurrTripOdo = Odometer - CurrInitOdo;
@@ -891,10 +831,13 @@ void read_data() {
     EstFull_Ah = 100 * Net_Ah / UsedSoC;
 
     CellVdiff = MAXcellv - MINcellv;
-
+    
     if (PrevBmsSoC > BmsSoC) {  // perform a BmsSoC vs SoC ratio calculation when BmsSoC changes
       PrevBmsSoC = BmsSoC;
       SocRatioCalc();
+    }
+    else if (PrevBmsSoC < 0){
+      PrevBmsSoC = BmsSoC;
     }
 
     if (PrevSoC != SoC) {  // perform "used_kWh" and "left_kWh" when SoC changes
@@ -946,7 +889,7 @@ void read_data() {
             old_lost = degrad_ratio;
           } else {
             degrad_ratio = old_lost;
-            if ((degrad_ratio > 1.2) || (degrad_ratio < 0.8)) {  // if a bad value got saved previously, initialize ratio to 1
+            if ((degrad_ratio > 1.2) || (degrad_ratio < 0.8)) {  // if a bad value[ got saved previously, initialize ratio to 1
               degrad_ratio = 1;
             }
           }
@@ -1018,16 +961,16 @@ void read_data() {
 
 void UpdateNetEnergy() {
 
-  if (InitCED == 0) {  //if discharge value have been reinitiate to 0 then
-    InitCED = CED;     //initiate to current CED for initial CED value and
-    InitSoC = SoC;     //initiate to current CED for initial SoC value and
+  if (InitCED == 0) {  //if discharge value[ have been reinitiate to 0 then
+    InitCED = CED;     //initiate to current CED for initial CED value[ and
+    InitSoC = SoC;     //initiate to current CED for initial SoC value[ and
     CurrInitCED = CED;
   }
   if (InitCDC == 0) {
     InitCDC = CDC;
   }
-  if (InitCEC == 0) {  //if charge value have been reinitiate to 0 then
-    InitCEC = CEC;     //initiate to current CEC for initial CEC value
+  if (InitCEC == 0) {  //if charge value[ have been reinitiate to 0 then
+    InitCEC = CEC;     //initiate to current CEC for initial CEC value[
     CurrInitCEC = CEC;
   }
   if (InitCCC == 0) {
@@ -1066,10 +1009,10 @@ void Integrat_power() {
 }
 
 //--------------------------------------------------------------------------------------------
-//                   Net Energy based on Power integration Function
+//                   Net Energy Charge based on Power integration Function
 //--------------------------------------------------------------------------------------------
 
-/*//////Function to calculate Energy by power integration since last reset //////////*/
+/*//////Function to calculate Energy Charge by current integration since last reset //////////*/
 
 void Integrat_current() {
   float curr_interval;
@@ -1115,7 +1058,7 @@ void RangeCalc() {
 
   if ((prev_odo != CurrTripOdo) && (distance < 0.9)) {
     if (TripOdo < 2) {
-      InitOdo = Odometer - distance;  // correct initial odometer value using speed integration if odometer changes within 0.9km
+      InitOdo = Odometer - distance;  // correct initial odometer value[ using speed integration if odometer changes within 0.9km
       TripOdo = Odometer - InitOdo;
     }
     CurrInitOdo = Odometer - distance;
@@ -1206,33 +1149,33 @@ void EnergyTOC() {
 }
 
 //--------------------------------------------------------------------------------------------
-//                   Function to calculate energy between two SoC values
+//                   Function to calculate energy between two SoC value
 //--------------------------------------------------------------------------------------------
 
-double Interpolate(double xValues[], double yValues[], int numValues, double pointX, bool trim = true) {
+double Interpolate(double xvalue[], double yvalue[], int numvalue, double pointX, bool trim = true) {
   if (trim) {
-    if (pointX <= xValues[0]) return yValues[0];
-    if (pointX >= xValues[numValues - 1]) return yValues[numValues - 1];
+    if (pointX <= xvalue[0]) return yvalue[0];
+    if (pointX >= xvalue[numvalue - 1]) return yvalue[numvalue - 1];
   }
 
   auto i = 0;
-  if (pointX <= xValues[0]) i = 0;
-  else if (pointX >= xValues[numValues - 1]) i = numValues - 1;
+  if (pointX <= xvalue[0]) i = 0;
+  else if (pointX >= xvalue[numvalue - 1]) i = numvalue - 1;
   else
-    while (pointX >= xValues[i + 1]) i++;
-  if (pointX == xValues[i + 1]) return yValues[i + 1];
+    while (pointX >= xvalue[i + 1]) i++;
+  if (pointX == xvalue[i + 1]) return yvalue[i + 1];
 
-  auto t = (pointX - xValues[i]) / (xValues[i + 1] - xValues[i]);
+  auto t = (pointX - xvalue[i]) / (xvalue[i + 1] - xvalue[i]);
   t = t * t * (3 - 2 * t);
-  return yValues[i] * (1 - t) + yValues[i + 1] * t;
+  return yvalue[i] * (1 - t) + yvalue[i + 1] * t;
 }
 
 float calc_kwh(float min_SoC, float max_SoC) {
-  /* variable for kWh/%SoC calculation: xValues = %SoC and yValues = kWh */
-  const int numValues = 21;
-  double xValues[] = { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 };
-  //double yValues[] = { 0.5487, 0.5921, 0.5979, 0.6053, 0.6139, 0.6199, 0.6238, 0.6268, 0.6295, 0.6324, 0.6362, 0.6418, 0.6524, 0.6601, 0.6684, 0.6771, 0.6859, 0.6951, 0.7046, 0.7147, 0.7249};
-  double yValues[] = { 0.5432, 0.5867, 0.5931, 0.6011, 0.6102, 0.6168, 0.6213, 0.6249, 0.6282, 0.6317, 0.6362, 0.6424, 0.6537, 0.6621, 0.6711, 0.6805, 0.6900, 0.7000, 0.7102, 0.7211, 0.7321 };
+  /* variable for kWh/%SoC calculation: xvalue = %SoC and yvalue = kWh */
+  const int numvalue = 21;
+  double xvalue[] = { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 };
+  //double yvalue[] = { 0.5487, 0.5921, 0.5979, 0.6053, 0.6139, 0.6199, 0.6238, 0.6268, 0.6295, 0.6324, 0.6362, 0.6418, 0.6524, 0.6601, 0.6684, 0.6771, 0.6859, 0.6951, 0.7046, 0.7147, 0.7249};
+  double yvalue[] = { 0.5432, 0.5867, 0.5931, 0.6011, 0.6102, 0.6168, 0.6213, 0.6249, 0.6282, 0.6317, 0.6362, 0.6424, 0.6537, 0.6621, 0.6711, 0.6805, 0.6900, 0.7000, 0.7102, 0.7211, 0.7321 };
   float integral;
   float interval;
   float return_kwh;
@@ -1242,7 +1185,7 @@ float calc_kwh(float min_SoC, float max_SoC) {
   float x = 0;
   for (int i = 0; i < N; ++i) {
     x = min_SoC + interval * i;
-    integral += Interpolate(xValues, yValues, numValues, x);  //64kWh battery energy equation
+    integral += Interpolate(xvalue, yvalue, numvalue, x);  //64kWh battery energy equation
   }
   //return_kwh = integral * interval;
   return_kwh = (integral * interval) * Calc_kWh_corr;
@@ -1253,32 +1196,31 @@ float calc_kwh(float min_SoC, float max_SoC) {
 //        Task on core 0 to Send data to Google Sheet via IFTTT web service Function
 //----------------------------------------------------------------------------------------
 
-void makeIFTTTRequest(void* pvParameters) {
-  for (;;) {
-    if (send_enabled && send_data) {      
+void makeIFTTTRequest(void * pvParameters){
+  for(;;){
+    if (send_enabled && send_data) {
       code_sent = false;
-      Serial.print("Connecting to ");
+      Serial.print("Connecting to "); 
       Serial.print(server);
-
+      
       WiFiClient client;
       int retries = 5;
-      while (!!!client.connect(server, 80) && (retries-- > 0)) {
+      while(!!!client.connect(server, 80) && (retries-- > 0)) {
         Serial.print(".");
       }
       Serial.println();
-      if (!!!client.connected()) {
+      if(!!!client.connected()) {
         Serial.println("Failed to connect...");
         code_sent = true;
       }
-
-      Serial.print("Request resource: ");
+      
+      Serial.print("Request resource: "); 
       Serial.println(resource);
-
+      
       float sensor_Values[nbParam];
-
-      char column_name[][15] = { "SoC", "Power", "BattMinT", "Heater", "Net_Ah", "Net_kWh", "AuxBattSoC", "AuxBattV", "Max_Pwr", "Max_Reg", "BmsSoC", "MAXcellv", "MINcellv", "MAXcellvNb", "MINcellvNb", "BATTv", "BATTc", "Speed", "Odometer", "CEC", "CED", "CDC", "CCC", "SOH", "BMS_ign", "OPtimemins", "OUTDOORtemp", "INDOORtemp", "SpdSelect", "LastSoC", "Calc_Used", "Calc_Left", "TripOPtime", "CurrOPtime", "PIDkWh_100", "kWh_100km", "degrad_ratio", "EstLeft_kWh", "span_kWh_100km", "SoCratio", "nbr_powerOn", "TireFL_P", "TireFR_P", "TireRL_P", "TireRR_P", "TireFL_T", "TireFR_T", "TireRL_T", "TireRR_T", "acc_energy", "Trip_dist", "distance", "BattMaxT", "acc_Ah", "acc_kWh_25", "acc_kWh_10", "acc_kWh_0", "acc_kWh_m10", "acc_kWh_m20", "acc_kWh_m20p", "acc_time_25", "acc_time_10", "acc_time_0", "acc_time_m10", "acc_time_m20", "acc_time_m20p", "acc_dist_25", "acc_dist_10", "acc_dist_0", "acc_dist_m10", "acc_dist_m20", "acc_dist_m20p", "acc_regen", "MaxDetNb", "MinDetNb", "Deter_Min" };
-      ;
-
+      
+      char column_name[ ][15]={"SoC","Power","BattMinT","Heater","Net_Ah","Net_kWh","AuxBattSoC","AuxBattV","Max_Pwr","Max_Reg","BmsSoC","MAXcellv","MINcellv","MAXcellvNb","MINcellvNb","BATTv","BATTc","Speed","Odometer","CEC","CED","CDC","CCC","SOH","BMS_ign","OPtimemins","OUTDOORtemp","INDOORtemp","SpdSelect","LastSoC","Calc_Used","Calc_Left","TripOPtime","CurrOPtime","PIDkWh_100","kWh_100km","degrad_ratio","EstLeft_kWh","span_kWh_100km","SoCratio","nbr_powerOn","TireFL_P","TireFR_P","TireRL_P","TireRR_P","TireFL_T","TireFR_T","TireRL_T","TireRR_T","acc_energy","Trip_dist","distance","BattMaxT","acc_Ah","acc_kWh_25","acc_kWh_10","acc_kWh_0","acc_kWh_m10","acc_kWh_m20","acc_kWh_m20p","acc_time_25","acc_time_10","acc_time_0","acc_time_m10","acc_time_m20","acc_time_m20p","acc_dist_25","acc_dist_10","acc_dist_0","acc_dist_m10","acc_dist_m20","acc_dist_m20p","acc_regen","MaxDetNb","MinDetNb","Deter_Min"};;
+      
       sensor_Values[0] = SoC;
       sensor_Values[1] = Power;
       sensor_Values[2] = BattMinT;
@@ -1288,7 +1230,7 @@ void makeIFTTTRequest(void* pvParameters) {
       sensor_Values[6] = AuxBattSoC;
       sensor_Values[7] = AuxBattV;
       sensor_Values[8] = Max_Pwr;
-      sensor_Values[9] = Max_Reg;
+      sensor_Values[9] = Max_Reg;  
       sensor_Values[10] = BmsSoC;
       sensor_Values[11] = MAXcellv;
       sensor_Values[12] = MINcellv;
@@ -1303,7 +1245,7 @@ void makeIFTTTRequest(void* pvParameters) {
       sensor_Values[21] = CDC;
       sensor_Values[22] = CCC;
       sensor_Values[23] = SOH;
-      sensor_Values[24] = BMS_ign;
+      sensor_Values[24] = BMS_ign;        
       sensor_Values[25] = OPtimemins;
       sensor_Values[26] = OUTDOORtemp;
       sensor_Values[27] = INDOORtemp;
@@ -1312,7 +1254,7 @@ void makeIFTTTRequest(void* pvParameters) {
       sensor_Values[30] = used_kwh;
       sensor_Values[31] = left_kwh;
       sensor_Values[32] = TripOPtime;
-      sensor_Values[33] = CurrOPtime;
+      sensor_Values[33] = CurrOPtime;      
       sensor_Values[34] = PIDkWh_100;
       sensor_Values[35] = kWh_100km;
       sensor_Values[36] = degrad_ratio;
@@ -1330,7 +1272,7 @@ void makeIFTTTRequest(void* pvParameters) {
       sensor_Values[48] = TireRR_T;
       sensor_Values[49] = acc_energy;
       sensor_Values[50] = Trip_dist;
-      sensor_Values[51] = distance;
+      sensor_Values[51] = distance; 
       sensor_Values[52] = BattMaxT;
       sensor_Values[53] = acc_Ah;
       sensor_Values[54] = acc_kWh_25;
@@ -1355,129 +1297,136 @@ void makeIFTTTRequest(void* pvParameters) {
       sensor_Values[73] = MaxDetNb;
       sensor_Values[74] = MinDetNb;
       sensor_Values[75] = Deter_Min;
-
+      
       String headerNames = "";
-      String payload = "";
-
-      int i = 0;
-
-      if (initscan || record_code != 0 || shutdown_esp) {
-        switch (record_code) {
-          case 0:  // No reset only header required, ESP32 power reboot
-            while (i != nbParam) {
-              if (i == 0) {
-                headerNames = String("{\"value1\":\"") + column_name[i];
-                i++;
+      String payload ="";
+      
+      int i=0;
+      
+      if(initscan || record_code != 0 || shutdown_esp){
+        switch (record_code)
+        {
+            case 0:   // No reset only header required, ESP32 power reboot
+              while(i!=nbParam)
+              {
+                if(i==0){
+                  headerNames = String("{\"value1\":\"") + column_name[i];
+                  i++;
+                }
+                if(i==nbParam)
+                  break;
+                headerNames = headerNames + "|||" + column_name[i];
+                i++;    
               }
-              if (i == nbParam)
-                break;
-              headerNames = headerNames + "|||" + column_name[i];
-              i++;
-            }
-            initscan = false;
-            break;
+              initscan = false;
+              break;
 
-          case 1:  // Write status for Reset after a battery was recharged
-            headerNames = String("{\"value1\":\"") + "|||" + "Battery_Recharged" + "|||" + "LastSoc:" + "|||" + mem_LastSoC + "|||" + "Soc:" + "|||" + mem_SoC + "|||" + "Power:" + "|||" + mem_Power;
-            record_code = 0;
-            initscan = true;
-            break;
+            case 1:   // Write status for Reset after a battery was recharged
+              headerNames = String("{\"value1\":\"") + "|||" + "Battery_Recharged" + "|||" + "LastSoc:" + "|||" + mem_LastSoC + "|||" + "Soc:" + "|||" + mem_SoC + "|||" + "Power:" + "|||"  + mem_Power;
+              record_code = 0;
+              initscan = true;
+              break;
 
-          case 2:  // Write status for Reset performed with reset button (right button)
-            headerNames = String("{\"value1\":\"") + "|||" + "Button_Reset";
-            record_code = 0;
-            initscan = true;
-            break;
+            case 2:   // Write status for Reset performed with reset button (right button)
+              headerNames = String("{\"value1\":\"") + "|||" + "Button_Reset";
+              record_code = 0;
+              initscan = true;
+              break;
 
-          case 3:  // Write status for Reset when Acc_energy is less then 0.3kWh when SoC changes
-            headerNames = String("{\"value1\":\"") + "|||" + "ACC_energy <0.3" + "|||" + "acc_energy:" + "|||" + mem_energy + "|||" + "PreSoC:" + "|||" + mem_PrevSoC + "|||" + "SoC:" + "|||" + mem_SoC;
-            record_code = 0;
-            initscan = true;
-            break;
+            case 3:   // Write status for Reset when Acc_energy is less then 0.3kWh when SoC changes
+              headerNames = String("{\"value1\":\"") + "|||" + "ACC_energy <0.3" + "|||" + "acc_energy:" + "|||" + mem_energy + "|||" + "PreSoC:" + "|||" + mem_PrevSoC + "|||" + "SoC:" + "|||" + mem_SoC;
+              record_code = 0;
+              initscan = true;
+              break;
 
-          case 4:  // Write status for Reset if SoC changes from 100 to 99% not going through 99.5%
-            headerNames = String("{\"value1\":\"") + "|||" + "100_to_99SoC_reset" + "|||" + "PreSoc:" + "|||" + mem_PrevSoC + "|||" + "SoC:" + "|||" + mem_SoC;
-            record_code = 0;
-            initscan = true;
-            break;
+            case 4:   // Write status for Reset if SoC changes from 100 to 99% not going through 99.5%
+              headerNames = String("{\"value1\":\"") + "|||" + "100_to_99SoC_reset" + "|||" + "PreSoc:" + "|||" + mem_PrevSoC + "|||" + "SoC:" + "|||" + mem_SoC;
+              record_code = 0;
+              initscan = true;
+              break;
 
-          case 5:  // Write that esp is going normal shutdown
+            case 5:   // Write that esp is going normal shutdown
             headerNames = String("{\"value1\":\"") + "|||" + "Normal Shutdown" + "|||" + "Power:" + "|||" + Power + "|||" + "SoC:" + "|||" + mem_SoC;            
-            code_received = true;            
+            code_received = true;
+            record_code = 0;            
             Serial.println("Code Received");
             break;
 
-          case 6:  // Write that esp is going timed shutdown
+            case 6:   // Write that esp is going timed shutdown
             headerNames = String("{\"value1\":\"") + "|||" + "Timer Shutdown" + "|||" + "Power:" + "|||" + Power + "|||" + "Timer:" + "|||" + shutdown_timer;            
             code_received = true;            
             break;
 
-          case 7:  // Write that esp is going low 12V shutdown
+            case 7:   // Write that esp is going low 12V shutdown
             headerNames = String("{\"value1\":\"") + "|||" + "Low 12V Shutdown" + "|||" + "12V Batt.:" + "|||" + AuxBattSoC + "|||" + "Timer:" + "|||" + shutdown_timer;            
             code_received = true;            
             break;
-        }
-        payload = headerNames;
-      }
 
-      else {
-        while (i != nbParam) {
-          if (i == 0) {
+        }      
+          payload = headerNames;
+      }
+        
+      else{
+        while(i!=nbParam) 
+        {
+          if(i==0)
+          {
             payload = String("{\"value1\":\"") + sensor_Values[i];
             i++;
           }
-          if (i == nbParam) {
-            break;
+          if(i==nbParam)
+          {
+             break;
           }
           payload = payload + "|||" + sensor_Values[i];
-          i++;
+          i++;    
         }
-      }
-
-      String jsonObject = payload + "\"}";
-
+      }      
+      
+      String jsonObject = payload + "\"}";                          
+                       
       client.println(String("POST ") + resource + " HTTP/1.1");
-      client.println(String("Host: ") + server);
+      client.println(String("Host: ") + server); 
       client.println("Connection: close\r\nContent-Type: application/json");
       client.print("Content-Length: ");
       client.println(jsonObject.length());
       client.println();
       client.println(jsonObject);
-      
-      int timeout = 5;  // 50 * 100mS = 5 seconds
-      while (!!!client.available() && (timeout-- > 0)) {
+                  
+      int timeout = 5; // 50 * 100mS = 5 seconds            
+      while(!!!client.available() && (timeout-- > 0)){
         delay(100);
       }
-      if (!!!client.available()) {
+      if(!!!client.available()) {
         Serial.println("No response...");
         code_sent = true;
       }
-      while (client.available()) {
+      while(client.available()){
         Serial.write(client.read());
       }
-
+      
       Serial.println();
       Serial.println("closing connection");
-      datasent = true;
       client.stop();
 
+      datasent = true;    
       send_data = false;
       pwr_changed = 0;
       loop_count = 0;
-
-      if (kWh_update) {  //add condition so "kWh_corr" is not trigger before a cycle after a "kWh_update"
-        Prev_kWh = Net_kWh;
-        kWh_update = false;  // reset kWh_update after it has been recorded and so the correction logic start again
-      }
-      if (corr_update) {
+      
+      if(kWh_update){ //add condition so "kWh_corr" is not trigger before a cycle after a "kWh_update"
+        Prev_kWh = Net_kWh;        
+        kWh_update = false;  // reset kWh_update after it has been recorded and so the correction logic start again       
+      }            
+      if(corr_update){  
         corr_update = false;  // reset corr_update after it has been recorded
       }
-      if (code_received) {
+      if (code_received){
         Serial.println("Sending code sent");
         code_sent = true;
-      }
+      }      
     }    
-    vTaskDelay(30);  // some delay is required to reset watchdog timer    
+    vTaskDelay(10); // some delay is required to reset watchdog timer
   }
 }
 
@@ -1494,6 +1443,7 @@ void drawRoundedRect(RoundedRect toDraw){
     toDraw.cornerRadius,
     toDraw.color
   );
+  
   int box1TextX = toDraw.xStart + (toDraw.xWidth / 2);
   int box1TextY = toDraw.yStart + (toDraw.yHeight / 2);
   tft.setCursor(box1TextX, box1TextY);
@@ -1509,16 +1459,16 @@ void button(){
   if (ts.touched()) {
     p = ts.getPoint();
     x = p.x;
-    y = p.y;      
+    y = p.y;
+          
     //Button 1 test
-    if ((x >= btnAgreen.xStart && x <= btnAgreen.xStart + btnAgreen.xWidth) && (y >= btnAgreen.yStart && y <= btnAgreen.yStart + btnAgreen.yHeight)) {      
+    if ((x >= btnAon.xStart && x <= btnAon.xStart + btnAon.xWidth) && (y >= btnAon.yStart && y <= btnAon.yStart + btnAon.yHeight)) {      
       TouchTime = (millis() - initTouchTime) / 1000;      
       if (TouchTime > 4 & !TouchLatch){
         Serial.println("Button1 Long Press");
         TouchLatch = true;        
         InitRst = true;            
-        PrevSoC = 0;        
-        
+        PrevSoC = 0;
       }            
       if (!Btn1SetON)
       {  
@@ -1537,13 +1487,14 @@ void button(){
     } 
         
     //Button 2 test
-    if ((x >= btnBgreen.xStart && x <= btnBgreen.xStart + btnBgreen.xWidth) && (y >= btnBgreen.yStart && y <= btnBgreen.yStart + btnBgreen.yHeight)) {      
+    if ((x >= btnBon.xStart && x <= btnBon.xStart + btnBon.xWidth) && (y >= btnBon.yStart && y <= btnBon.yStart + btnBon.yHeight)) {      
       TouchTime = (millis() - initTouchTime) / 1000;
       if (TouchTime >= 4 & !TouchLatch){
         TouchLatch = true;        
         Serial.println("Button2 Long Press");
-        screenNbr = 3;
-        DrawBackground = true;        
+        Serial.print("Setting PWM for TFT backlight to default intensity... ");
+        ledcWrite(pwmLedChannelTFT, 40);
+        Serial.println("DONE");        
         Btn2SetON = true;
       }
       if (!Btn2SetON)
@@ -1563,7 +1514,7 @@ void button(){
     }
 
     //Button 3 test
-    if ((x >= btnCgreen.xStart && x <= btnCgreen.xStart + btnCgreen.xWidth) && (y >= btnCgreen.yStart && y <= btnCgreen.yStart + btnCgreen.yHeight)) {      
+    if ((x >= btnCon.xStart && x <= btnCon.xStart + btnCon.xWidth) && (y >= btnCon.yStart && y <= btnCon.yStart + btnCon.yHeight)) {      
       TouchTime = (millis() - initTouchTime) / 1000;
       if (TouchTime >= 4 & !TouchLatch){
         TouchLatch = true;        
@@ -1601,9 +1552,9 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
 
   Serial.println("saving");
   InitOdo = Odometer;
-  InitCED = CED;  //initiate to current CED for initial CED value and
-  InitSoC = SoC;  //initiate to current CED for initial SoC value and
-  InitCEC = CEC;  //initiate to current CEC for initial CEC value and
+  InitCED = CED;  //initiate to current CED for initial CED value[ and
+  InitSoC = SoC;  //initiate to current CED for initial SoC value[ and
+  InitCEC = CEC;  //initiate to current CEC for initial CEC value[ and
   InitCDC = CDC;
   InitCCC = CCC;
   Net_kWh = 0;
@@ -1629,7 +1580,7 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   EEPROM.writeFloat(24, InitCDC);  //save initial Calculated CED to Flash memory
   EEPROM.writeFloat(28, InitCCC);  //save initial Calculated CED to Flash memory
   EEPROM.commit();
-  Serial.println("Values saved to EEPROM");
+  Serial.println("value saved to EEPROM");
   CurrInitCED = CED;
   CurrInitCEC = CEC;
   CurrInitOdo = Odometer;
@@ -1647,7 +1598,7 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
 
 /*////////////// Current Trip Reset ///////////////// */
 
-void ResetCurrTrip() {  // when the car is turned On, current trip values are resetted.
+void ResetCurrTrip() {  // when the car is turned On, current trip value are resetted.
 
   if (
     ResetOn && (SoC > 1) && (Odometer > 1) && (CED > 1) && data_ready) {  // ResetOn condition might be enough, might need to update code...
@@ -1676,7 +1627,7 @@ void ResetCurrTrip() {  // when the car is turned On, current trip values are re
       energy_array[i] = acc_energy;
     }
     degrad_ratio = old_lost;
-    if ((degrad_ratio > 1.2) || (degrad_ratio < 0.8)) {  // if a bad value got saved previously, initial ratio to 1
+    if ((degrad_ratio > 1.2) || (degrad_ratio < 0.8)) {  // if a bad value[ got saved previously, initial ratio to 1
       degrad_ratio = 1;
     }
   }
@@ -1716,7 +1667,7 @@ void save_lost(char selector) {
   if (selector == 'D' && !DriveOn) {
     DriveOn = true;
   }
-  if (selector == 'P' && DriveOn && SoC > 0) {  // when the selector is set to Park, some values are saved to be used the next time the car is started
+  if (selector == 'P' && DriveOn && SoC > 0) {  // when the selector is set to Park, some value are saved to be used the next time the car is started
     DriveOn = false;
 
     EEPROM.writeFloat(32, degrad_ratio);
@@ -1814,274 +1765,116 @@ void DisplayPage() {
     tft.setFreeFont(&FreeSans12pt7b);
     tft.setTextColor(TFT_WHITE, TFT_BLUE);
     tft.setTextPadding(160);
-    tft.drawString(title1, tft.width() / 4, textLvl1, 1);
-    tft.drawString(title2, tft.width() / 4, textLvl2, 1);
-    tft.drawString(title3, tft.width() / 4, textLvl3, 1);
-    tft.drawString(title4, tft.width() / 4, textLvl4, 1);
-    tft.drawString(title5, tft.width() / 4, textLvl5, 1);
-    tft.drawString(title6, 3 * (tft.width() / 4), textLvl1, 1);
-    tft.drawString(title7, 3 * (tft.width() / 4), textLvl2, 1);
-    tft.drawString(title8, 3 * (tft.width() / 4), textLvl3, 1);
-    tft.drawString(title9, 3 * (tft.width() / 4), textLvl4, 1);
-    tft.drawString(title10, 3 * (tft.width() / 4), textLvl5, 1);
-
-    tft.drawLine(1,textLvl1 - 10,319,textLvl1 - 10,TFT_DARKGREY);
-    tft.drawLine(tft.width() / 2,textLvl1 - 10,tft.width() / 2,drawLvl5 + 24,TFT_DARKGREY);
-    tft.drawLine(1,drawLvl5 + 24,319,drawLvl5 + 24,TFT_DARKGREY);
-
-    strcpy(prev_value1, "");
-    strcpy(prev_value2, "");
-    strcpy(prev_value3, "");
-    strcpy(prev_value4, "");
-    strcpy(prev_value5, "");
-    strcpy(prev_value6, "");
-    strcpy(prev_value7, "");
-    strcpy(prev_value8, "");
-    strcpy(prev_value9, "");
-    strcpy(prev_value10, "");
     
-    switch (screenNbr) {  // button select to display
+    // Draw parameter names
+    for (int i = 0; i < 10; i++) {  
+      if (i < 5) { // update left colunm
+        tft.drawString(titre[i], tft.width() / 4, textLvl[i], 1);
+      }
+      else { // update right colunm
+        tft.drawString(titre[i], 3 * (tft.width() / 4), textLvl[i], 1);
+      }
+    }
+
+    // Draw frame lines
+    tft.drawLine(1,textLvl[0] - 10,319,textLvl[0] - 10,TFT_DARKGREY);
+    tft.drawLine(tft.width() / 2,textLvl[0] - 10,tft.width() / 2,drawLvl[4] + 24,TFT_DARKGREY);
+    tft.drawLine(1,drawLvl[4] + 24,319,drawLvl[4] + 24,TFT_DARKGREY);
+
+    // Initialize previous values to empty value so value will be updated when background is redrawn
+    for (int i = 0; i < 10; i++) {
+      strcpy(prev_value[i], "");
+    }
+    
+    // button state to display
+    switch (screenNbr) {  
       
       case 0: 
         tft.setFreeFont(&FreeSans9pt7b);        
-        drawRoundedRect(btnAgreen);      
-        drawRoundedRect(btnBred);
-        drawRoundedRect(btnCred);
+        drawRoundedRect(btnAon);      
+        drawRoundedRect(btnBoff);
+        drawRoundedRect(btnCoff);
         tft.setFreeFont(&FreeSans18pt7b);
-        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-        strcpy(MainTitle, "Consommation");        
-        tft.drawString(MainTitle, tft.width() / 2, 22, 1); 
+        tft.setTextColor(MainTitleColor, TFT_BLACK);                
+        tft.drawString(Maintitre[screenNbr], tft.width() / 2, 22, 1); 
         break; 
          
       case 1: 
         tft.setFreeFont(&FreeSans9pt7b);        
-        drawRoundedRect(btnAred);      
-        drawRoundedRect(btnBgreen);
-        drawRoundedRect(btnCred);
+        drawRoundedRect(btnAoff);      
+        drawRoundedRect(btnBon);
+        drawRoundedRect(btnCoff);
         tft.setFreeFont(&FreeSans18pt7b);
-        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-        strcpy(MainTitle, "Batt. Info");        
-        tft.drawString(MainTitle, tft.width() / 2, 22, 1); 
+        tft.setTextColor(MainTitleColor, TFT_BLACK);                
+        tft.drawString(Maintitre[screenNbr], tft.width() / 2, 22, 1); 
         break;
         
       case 2: 
         tft.setFreeFont(&FreeSans9pt7b);        
-        drawRoundedRect(btnAred);      
-        drawRoundedRect(btnBred);
-        drawRoundedRect(btnCgreen);
+        drawRoundedRect(btnAoff);      
+        drawRoundedRect(btnBoff);
+        drawRoundedRect(btnCon);
         tft.setFreeFont(&FreeSans18pt7b);
-        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-        strcpy(MainTitle, "Puissance");        
-        tft.drawString(MainTitle, tft.width() / 2, 22, 1); 
+        tft.setTextColor(MainTitleColor, TFT_BLACK);                
+        tft.drawString(Maintitre[screenNbr], tft.width() / 2, 22, 1); 
         break;
 
       case 3: 
         tft.setFreeFont(&FreeSans9pt7b);        
-        drawRoundedRect(btnAred);      
-        drawRoundedRect(btnBred);
-        drawRoundedRect(btnCred);
+        drawRoundedRect(btnAoff);      
+        drawRoundedRect(btnBoff);
+        drawRoundedRect(btnCoff);
         tft.setFreeFont(&FreeSans18pt7b);
-        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-        strcpy(MainTitle, "Setup");        
-        tft.drawString(MainTitle, tft.width() / 2, 22, 1); 
+        tft.setTextColor(MainTitleColor, TFT_BLACK);                
+        tft.drawString(Maintitre[screenNbr], tft.width() / 2, 22, 1); 
         break;
     }
     DrawBackground = false;    
   }
   tft.setFreeFont(&FreeSans18pt7b);
 
-  if (value1_float < 0) {
-    value1_float = abs(value1_float);
-    negative_flag1 = true;
-  } else {
-    negative_flag1 = false;
-  }
-  if (value2_float < 0) {
-    value2_float = abs(value2_float);
-    negative_flag2 = true;
-  } else {
-    negative_flag2 = false;
-  }
-  if (value3_float < 0) {
-    value3_float = abs(value3_float);
-    negative_flag3 = true;
-  } else {
-    negative_flag3 = false;
-  }
-  if (value4_float < 0) {
-    value4_float = abs(value4_float);
-    negative_flag4 = true;
-  } else {
-    negative_flag4 = false;
-  }
-  if (value5_float < 0) {
-    value5_float = abs(value5_float);
-    negative_flag5 = true;
-  } else {
-    negative_flag5 = false;
-  }
-  if (value6_float < 0) {
-    value6_float = abs(value6_float);
-    negative_flag6 = true;
-  } else {
-    negative_flag6 = false;
-  }
-  if (value7_float < 0) {
-    value7_float = abs(value7_float);
-    negative_flag7 = true;
-  } else {
-    negative_flag7 = false;
-  }
-  if (value8_float < 0) {
-    value8_float = abs(value8_float);
-    negative_flag8 = true;
-  } else {
-    negative_flag8 = false;
-  }
-  if (value9_float < 0) {
-    value9_float = abs(value9_float);
-    negative_flag9 = true;
-  } else {
-    negative_flag9 = false;
-  }
-  if (value10_float < 0) {
-    value10_float = abs(value10_float);
-    negative_flag10 = true;
-  } else {
-    negative_flag10 = false;
-  }
-
-  dtostrf(value1_float, 3, nbr_decimal1, value1);
-  dtostrf(value2_float, 3, nbr_decimal2, value2);
-  dtostrf(value3_float, 3, nbr_decimal3, value3);
-  dtostrf(value4_float, 3, nbr_decimal4, value4);
-  dtostrf(value5_float, 3, nbr_decimal5, value5);
-  dtostrf(value6_float, 3, nbr_decimal6, value6);
-  dtostrf(value7_float, 3, nbr_decimal7, value7);
-  dtostrf(value8_float, 3, nbr_decimal8, value8);
-  dtostrf(value9_float, 3, nbr_decimal9, value9);
-  dtostrf(value10_float, 3, nbr_decimal10, value10);
-
-  if (value1 != prev_value1) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value1, tft.width() / 4, drawLvl1, 1);
-    if (negative_flag1) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value1, tft.width() / 4, drawLvl1, 1);
+  // test for negative values and set negative flag
+  for (int i = 0; i < 10; i++) {  
+    if (value_float[i] < 0) {
+    value_float[i] = abs(value_float[0]);
+    negative_flag[i] = true;
     } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value1, tft.width() / 4, drawLvl1, 1);
+      negative_flag[i] = false;
     }
-    strcpy(prev_value1, value1);
+    dtostrf(value_float[i], 3, nbr_decimal[i], value[i]);
   }
-  if (value2 != prev_value2) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value2, tft.width() / 4, drawLvl2, 1);
-    if (negative_flag2) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value2, tft.width() / 4, drawLvl2, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value2, tft.width() / 4, drawLvl2, 1);
+  
+  // if value changes update values
+  for (int i = 0; i < 10; i++) {  
+    if ((value[i] != prev_value[i]) && (i < 5)) { // update left colunm
+      tft.setTextColor(TFT_BLACK, TFT_BLACK);
+      tft.drawString(prev_value[i], tft.width() / 4, drawLvl[i], 1);
+      if (negative_flag[i]) {
+        tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+        tft.drawString(value[i], tft.width() / 4, drawLvl[i], 1);
+      } 
+      else {
+        tft.setTextColor(TFT_GREEN, TFT_BLACK);
+        tft.drawString(value[i], tft.width() / 4, drawLvl[i], 1);
+      }
+      strcpy(prev_value[i], value[i]);
     }
-    strcpy(prev_value2, value2);
-  }
-  if (value3 != prev_value3) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value3, tft.width() / 4, drawLvl3, 1);
-    if (negative_flag3) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value3, tft.width() / 4, drawLvl3, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value3, tft.width() / 4, drawLvl3, 1);
+    else if (value[i] != prev_value[i]) { // update right colunm
+      tft.setTextColor(TFT_BLACK, TFT_BLACK);
+      tft.drawString(prev_value[i], 3 * (tft.width() / 4), drawLvl[i], 1);
+      if (negative_flag[i]) {
+        tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+        tft.drawString(value[i], 3 * (tft.width() / 4), drawLvl[i], 1);
+      } 
+      else {
+        tft.setTextColor(TFT_GREEN, TFT_BLACK);
+        tft.drawString(value[i], 3 * (tft.width() / 4), drawLvl[i], 1);
+      }
+      strcpy(prev_value[i], value[i]);
     }
-    strcpy(prev_value3, value3);
   }
-  if (value4 != prev_value4) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value4, tft.width() / 4, drawLvl4, 1);
-    if (negative_flag4) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value4, tft.width() / 4, drawLvl4, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value4, tft.width() / 4, drawLvl4, 1);
-    }
-    strcpy(prev_value4, value4);
-  }
-  if (value5 != prev_value5) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value5, tft.width() / 4, drawLvl5, 1);
-    if (negative_flag5) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value5, tft.width() / 4, drawLvl5, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value5, tft.width() / 4, drawLvl5, 1);
-    }
-    strcpy(prev_value5, value5);
-  }
-  if (value6 != prev_value6) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value6, 3 * (tft.width() / 4), drawLvl1, 1);
-    if (negative_flag6) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value6, 3 * (tft.width() / 4), drawLvl1, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value6, 3 * (tft.width() / 4), drawLvl1, 1);
-    }
-    strcpy(prev_value6, value6);
-  }
-  if (value7 != prev_value7) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value7, 3 * (tft.width() / 4), drawLvl2, 1);
-    if (negative_flag7) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value7, 3 * (tft.width() / 4), drawLvl2, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value7, 3 * (tft.width() / 4), drawLvl2, 1);
-    }
-    strcpy(prev_value7, value7);
-  }
-  if (value8 != prev_value8) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value8, 3 * (tft.width() / 4), drawLvl3, 1);
-    if (negative_flag8) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value8, 3 * (tft.width() / 4), drawLvl3, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value8, 3 * (tft.width() / 4), drawLvl3, 1);
-    }
-    strcpy(prev_value8, value8);
-  }
-  if (value9 != prev_value9) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value9, 3 * (tft.width() / 4), drawLvl4, 1);
-    if (negative_flag9) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value9, 3 * (tft.width() / 4), drawLvl4, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value9, 3 * (tft.width() / 4), drawLvl4, 1);
-    }
-    strcpy(prev_value9, value9);
-  }
-  if (value10 != prev_value10) {
-    tft.setTextColor(TFT_BLACK, TFT_BLACK);
-    tft.drawString(prev_value10, 3 * (tft.width() / 4), drawLvl5, 1);
-    if (negative_flag10) {
-      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-      tft.drawString(value10, 3 * (tft.width() / 4), drawLvl5, 1);
-    } else {
-      tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      tft.drawString(value10, 3 * (tft.width() / 4), drawLvl5, 1);
-    }
-    strcpy(prev_value10, value10);
-  }
+  
+  
 }
 //-------------------------------------------------------------------------------------
 //             Start of Pages content definition
@@ -2090,78 +1883,40 @@ void DisplayPage() {
 /*///////////////// Display Page 1 //////////////////////*/
 void page1() {
 
-  strcpy(title1,"SoC");
-  strcpy(title2,"PIDkWh_100");
-  strcpy(title3,"kWh/100km");
-  strcpy(title4,"10Km_kWh");
-  strcpy(title5,"EstLeft_kWh");
-  strcpy(title6,"TripOdo");  
-  strcpy(title7,"Est_range");
-  strcpy(title8,"Est_range");  
-  strcpy(title9,"Est_range");
-  strcpy(title10,"used_kwh");
-  value1_float = SoC;  
-  value2_float = PIDkWh_100;
-  value3_float = kWh_100km;
-  value4_float = span_kWh_100km;
-  value5_float = EstLeft_kWh;  
-  value6_float = TripOdo;
-  value7_float = Est_range3;
-  value8_float = Est_range;
-  value9_float = Est_range2;
-  value10_float = used_kwh;
+  strcpy(titre[0],"SoC");
+  strcpy(titre[1],"PIDkWh_100");
+  strcpy(titre[2],"kWh/100km");
+  strcpy(titre[3],"10Km_kWh");
+  strcpy(titre[4],"EstLeft_kWh");
+  strcpy(titre[5],"TripOdo");  
+  strcpy(titre[6],"Est_range");
+  strcpy(titre[7],"Est_range");  
+  strcpy(titre[8],"Est_range");
+  strcpy(titre[9],"used_kwh");
+  value_float[0] = SoC;  
+  value_float[1] = PIDkWh_100;
+  value_float[2] = kWh_100km;
+  value_float[3] = span_kWh_100km;
+  value_float[4] = EstLeft_kWh;  
+  value_float[5] = TripOdo;
+  value_float[6] = Est_range3;
+  value_float[7] = Est_range;
+  value_float[8] = Est_range2;
+  value_float[9] = used_kwh;
   
-  if (value1_float >= 100) {
-    nbr_decimal1 = 0;
-  } else {
-    nbr_decimal1 = 1;
+  // set number of decimals for each value to display
+  for (int i = 0; i < 10; i++) {  
+    if (value_float[i] >= 100) {
+      nbr_decimal[i] = 0;
+    }
+    else if ((value_float[i] < 5) && (value_float[i] >= 0)) {
+      nbr_decimal[i] = 2;
+    } 
+    else {
+      nbr_decimal[i] = 1;
+    }
   }
-  if (value2_float >= 100) {
-    nbr_decimal2 = 0;
-  } else {
-    nbr_decimal2 = 1;
-  }
-  if (value3_float >= 100) {
-    nbr_decimal3 = 0;
-  } else {
-    nbr_decimal3 = 1;
-  }
-  if (value4_float >= 100) {
-    nbr_decimal4 = 0;
-  } else {
-    nbr_decimal4 = 1;
-  }
-  if (value5_float >= 100) {
-    nbr_decimal5 = 0;
-  } else {
-    nbr_decimal5 = 1;
-  }
-  if (value6_float >= 100) {
-    nbr_decimal6 = 0;
-  } else {
-    nbr_decimal6 = 1;
-  }
-  if (value7_float >= 100) {
-    nbr_decimal7 = 0;
-  } else {
-    nbr_decimal7 = 1;
-  }
-  if (value8_float >= 100) {
-    nbr_decimal8 = 0;
-  } else {
-    nbr_decimal8 = 1;
-  }
-  if (value9_float >= 100) {
-    nbr_decimal9 = 0;
-  } else {
-    nbr_decimal9 = 1;
-  }
-  if (value10_float >= 100) {
-    nbr_decimal10 = 0;
-  } else {
-    nbr_decimal10 = 1;
-  }
-
+  
   DisplayPage();
 }
 /*///////////////// End of Display Page 1 //////////////////////*/
@@ -2169,77 +1924,40 @@ void page1() {
 /*///////////////// Display Page 2 //////////////////////*/
 void page2() {
 
-  strcpy(title1, "SoC");
-  strcpy(title2, "MIN_Temp");
-  strcpy(title3, "MAXcellv");
-  strcpy(title4, "SOH");
-  strcpy(title5, "Full_Ah");
-  strcpy(title6, "BmsSoC");
-  strcpy(title7, "MAX_Temp");
-  strcpy(title8, "CellVdiff");
-  strcpy(title9, "Det_Total");
-  strcpy(title10, "12V_SoC");
-  value1_float = SoC;
-  value2_float = BattMinT;
-  value3_float = MAXcellv;
-  value4_float = SOH;
-  value5_float = EstFull_Ah;
-  value6_float = BmsSoC;
-  value7_float = BattMaxT;
-  value8_float = CellVdiff;
-  value9_float = Deter_Min;
-  value10_float = AuxBattSoC;
-  if (value1_float >= 100) {
-    nbr_decimal1 = 0;
-  } else {
-    nbr_decimal1 = 1;
+  strcpy(titre[0], "SoC");
+  strcpy(titre[1], "MIN_Temp");
+  strcpy(titre[2], "MAXcellv");
+  strcpy(titre[3], "SOH");
+  strcpy(titre[4], "Full_Ah");
+  strcpy(titre[5], "BmsSoC");
+  strcpy(titre[6], "MAX_Temp");
+  strcpy(titre[7], "CellVdiff");
+  strcpy(titre[8], "Det_Total");
+  strcpy(titre[9], "12V_SoC");
+  value_float[0] = SoC;
+  value_float[1] = BattMinT;
+  value_float[2] = MAXcellv;
+  value_float[3] = SOH;
+  value_float[4] = EstFull_Ah;
+  value_float[5] = BmsSoC;
+  value_float[6] = BattMaxT;
+  value_float[7] = CellVdiff;
+  value_float[8] = Deter_Min;
+  value_float[9] = AuxBattSoC;
+  
+  // set number of decimals for each value to display
+  for (int i = 0; i < 10; i++) {  
+    if (value_float[i] >= 100) {
+      nbr_decimal[i] = 0;
+    }
+    else if ((value_float[i] < 5) && (value_float[i] >= 0)) {
+      nbr_decimal[i] = 2;
+    } 
+    else {
+      nbr_decimal[i] = 1;
+    }
   }
-  if (value2_float >= 100) {
-    nbr_decimal2 = 0;
-  } else {
-    nbr_decimal2 = 1;
-  }
-  if (value3_float >= 100) {
-    nbr_decimal3 = 0;
-  } else {
-    nbr_decimal3 = 1;
-  }
-  if (value4_float >= 100) {
-    nbr_decimal4 = 0;
-  } else {
-    nbr_decimal4 = 1;
-  }
-  if (value5_float >= 100) {
-    nbr_decimal5 = 0;
-  } else {
-    nbr_decimal5 = 1;
-  }
-  if (value6_float >= 100) {
-    nbr_decimal6 = 0;
-  } else {
-    nbr_decimal6 = 1;
-  }
-  if (value7_float >= 100) {
-    nbr_decimal7 = 0;
-  } else {
-    nbr_decimal7 = 1;
-  }
-  if (value8_float >= 100) {
-    nbr_decimal8 = 0;
-  } else {
-    nbr_decimal8 = 2;
-  }
-  if (value9_float >= 100) {
-    nbr_decimal9 = 0;
-  } else {
-    nbr_decimal9 = 1;
-  }
-  if (value10_float >= 100) {
-    nbr_decimal10 = 0;
-  } else {
-    nbr_decimal10 = 1;
-  }
-
+  
   DisplayPage();
 }
 /*///////////////// End of Display Page 2 //////////////////////*/
@@ -2247,129 +1965,54 @@ void page2() {
 /*///////////////// Display Page 3 //////////////////////*/
 void page3() {
 
-  strcpy(title1, "Power");
-  strcpy(title2, "MIN_Temp");
-  strcpy(title3, "PID_kWh");
-  strcpy(title4, "Calc_Used");
-  strcpy(title5, "SoC");
-  strcpy(title6, "Max_Pwr");
-  strcpy(title7, "MAX_Temp");
-  strcpy(title8, "Int_Energ");
-  strcpy(title9, "Calc_Left");
-  strcpy(title10, "Heater");  
-  value1_float = Power;
-  value2_float = BattMinT;
-  value3_float = Net_kWh;
-  value4_float = used_kwh;
-  value5_float = SoC;
-  value6_float = Max_Pwr;
-  value7_float = BattMaxT;
-  value8_float = acc_energy;
-  value9_float = left_kwh;
-  value10_float = Heater;
-  
-  if (value1_float >= 100) {
-    nbr_decimal1 = 0;
-  } else {
-    nbr_decimal1 = 1;
-  }
-  if (value2_float >= 100) {
-    nbr_decimal2 = 0;
-  } else {
-    nbr_decimal2 = 1;
-  }
-  if (value3_float >= 100) {
-    nbr_decimal3 = 0;
-  } else {
-    nbr_decimal3 = 1;
-  }
-  if (value4_float >= 100) {
-    nbr_decimal4 = 0;
-  } else {
-    nbr_decimal4 = 1;
-  }
-  if (value5_float >= 100) {
-    nbr_decimal5 = 0;
-  } else {
-    nbr_decimal5 = 1;
-  }
-  if (value6_float >= 100) {
-    nbr_decimal6 = 0;
-  } else {
-    nbr_decimal6 = 1;
-  }
-  if (value7_float >= 100) {
-    nbr_decimal7 = 0;
-  } else {
-    nbr_decimal7 = 1;
-  }
-  if (value8_float >= 100) {
-    nbr_decimal8 = 0;
-  } else {
-    nbr_decimal8 = 1;
-  }
-  if (value9_float >= 100) {
-    nbr_decimal9 = 0;
-  } else {
-    nbr_decimal9 = 1;
-  }
-  if (value10_float >= 100) {
-    nbr_decimal10 = 0;
-  } else {
-    nbr_decimal10 = 1;
-  }
+  strcpy(titre[0], "Power");
+  strcpy(titre[1], "MIN_Temp");
+  strcpy(titre[2], "PID_kWh");
+  strcpy(titre[3], "Calc_Used");
+  strcpy(titre[4], "SoC");
+  strcpy(titre[5], "Max_Pwr");
+  strcpy(titre[6], "MAX_Temp");
+  strcpy(titre[7], "Int_Energ");
+  strcpy(titre[8], "Calc_Left");
+  strcpy(titre[9], "Heater");  
+  value_float[0] = Power;
+  value_float[1] = BattMinT;
+  value_float[2] = Net_kWh;
+  value_float[3] = used_kwh;
+  value_float[4] = SoC;
+  value_float[5] = Max_Pwr;
+  value_float[6] = BattMaxT;
+  value_float[7] = acc_energy;
+  value_float[8] = left_kwh;
+  value_float[9] = Heater;
 
+  // set number of decimals for each value to display
+  for (int i = 0; i < 10; i++) {  
+    if (value_float[i] >= 100) {
+      nbr_decimal[i] = 0;
+    }
+    else if ((value_float[i] < 5) && (value_float[i] >= 0)) {
+      nbr_decimal[i] = 2;
+    } 
+    else {
+      nbr_decimal[i] = 1;
+    }
+  }
+  
   DisplayPage();
 }
 /*///////////////// End of Display Page 3 //////////////////////*/
-
-/*///////////////// Display Page 4 //////////////////////*/
-void page4() {
-
-  strcpy(title1, "MIN_Temp");
-  strcpy(title2, "Heater");
-  strcpy(title3, "Power");
-  strcpy(title4, "MAX_Temp");
-  value1_float = BattMinT;
-  value2_float = Heater;
-  value3_float = Power;
-  value4_float = BattMaxT;
-  nbr_decimal1 = 1;
-  nbr_decimal2 = 1;
-  if (value1_float >= 100) {
-    nbr_decimal1 = 0;
-  } else {
-    nbr_decimal1 = 1;
-  }
-  if (value2_float >= 100) {
-    nbr_decimal2 = 0;
-  } else {
-    nbr_decimal2 = 1;
-  }
-  if (value3_float >= 100) {
-    nbr_decimal3 = 0;
-  } else {
-    nbr_decimal3 = 1;
-  }
-  if (value4_float >= 100) {
-    nbr_decimal4 = 0;
-  } else {
-    nbr_decimal4 = 1;
-  }
-
-  DisplayPage();
-}
-/*///////////////// End of Display Page 4 //////////////////////*/
 
 /*///////////////////////////////////////////////////////////////////////*/
 /*                     START OF LOOP                                     */
 /*///////////////////////////////////////////////////////////////////////*/
 
-void loop() {
+void loop() {  
 
-  loop_count += 1;
-  //ButtonLoop();
-
+  /*/////// Test touch button /////////////////*/
+  button();
+  
+  /*/////// This will trigger logic to send data to Google sheet /////////////////*/
   currentTimer = millis();
   if (currentTimer - previousTimer >= sendInterval) {    
     send_data = true;  // This will trigger logic to send data to Google sheet
@@ -2379,18 +2022,18 @@ void loop() {
     }
   }
 
+  //  To display a led status when values are sent to Google Sheet
   if (datasent){
     tft.fillCircle(20, 20, 6,TFT_GREEN);
-    datasent = false;
+    if (currentTimer - previousTimer >= 500){
+      datasent = false;
+    }
   }
   else{
     tft.fillCircle(20, 20, 6,TFT_BLACK);
-  }
-
-
-  /*/////// Read each OBDII PIDs /////////////////*/
-
-  button();
+  }  
+  
+  /*/////// Read each OBDII PIDs /////////////////*/ 
     
   read_data();
 
@@ -2409,7 +2052,7 @@ void loop() {
       case 0: page1(); break;
       case 1: page2(); break;
       case 2: page3(); break;
-      case 3: page4(); break;    
+      case 3: page1(); break;    
     }
   }
   /*/////// Display Setup Page/////////////////*/
