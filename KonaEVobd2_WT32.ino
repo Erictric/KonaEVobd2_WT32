@@ -233,8 +233,8 @@ bool corr_update = false;
 bool ESP_on = false;
 bool DrawBackground = true;
 char titre[10][12];
-char value[10][5];
-char prev_value[10][5];
+char value[10][7];
+char prev_value[10][7];
 bool negative_flag[10];
 float value_float[10];
 int nbr_decimal[10];
@@ -250,7 +250,7 @@ char* BtnBtext = "BATT";
 char* BtnCtext = "POWER";
 char Maintitre[][13] = {"Consommation", "Batt. Info", "Puissance", "Set-Up"};
 uint16_t MainTitleColor = TFT_DARKGREY;
-uint16_t BtnOnColor = TFT_GOLD;
+uint16_t BtnOnColor = TFT_DARKCYAN;
 uint16_t BtnOffColor = TFT_LIGHTGREY;
 
 unsigned long initTouchTime = 0;
@@ -828,7 +828,12 @@ void read_data() {
 
     CurrUsedSoC = CurrInitSoC - SoC;
 
-    EstFull_Ah = 100 * Net_Ah / UsedSoC;
+    if (UsedSoC < 0.5){
+      EstFull_Ah = 186;
+    }
+    else{
+      EstFull_Ah = 100 * Net_Ah / UsedSoC;
+    }
 
     CellVdiff = MAXcellv - MINcellv;
     
@@ -1836,9 +1841,10 @@ void DisplayPage() {
   // test for negative values and set negative flag
   for (int i = 0; i < 10; i++) {  
     if (value_float[i] < 0) {
-    value_float[i] = abs(value_float[0]);
+    value_float[i] = abs(value_float[i]);
     negative_flag[i] = true;
-    } else {
+    }
+    else {
       negative_flag[i] = false;
     }
     dtostrf(value_float[i], 3, nbr_decimal[i], value[i]);
@@ -1906,10 +1912,10 @@ void page1() {
   
   // set number of decimals for each value to display
   for (int i = 0; i < 10; i++) {  
-    if (value_float[i] >= 100) {
+    if (value_float[i] >= 1000) {
       nbr_decimal[i] = 0;
     }
-    else if ((value_float[i] < 5) && (value_float[i] >= 0)) {
+    else if ((value_float[i] < 10) && (value_float[i] > -10)) {
       nbr_decimal[i] = 2;
     } 
     else {
@@ -1947,12 +1953,12 @@ void page2() {
   
   // set number of decimals for each value to display
   for (int i = 0; i < 10; i++) {  
-    if (value_float[i] >= 100) {
+    if (value_float[i] >= 1000) {
       nbr_decimal[i] = 0;
     }
-    else if ((value_float[i] < 5) && (value_float[i] >= 0)) {
+    else if ((value_float[i] < 10) && (value_float[i] > -10)) {
       nbr_decimal[i] = 2;
-    } 
+    }
     else {
       nbr_decimal[i] = 1;
     }
@@ -1988,10 +1994,10 @@ void page3() {
 
   // set number of decimals for each value to display
   for (int i = 0; i < 10; i++) {  
-    if (value_float[i] >= 100) {
+    if (value_float[i] >= 1000) {
       nbr_decimal[i] = 0;
     }
-    else if ((value_float[i] < 5) && (value_float[i] >= 0)) {
+    else if ((value_float[i] < 10) && (value_float[i] > -10)) {
       nbr_decimal[i] = 2;
     } 
     else {
@@ -2061,7 +2067,7 @@ void loop() {
   }
 
   /*/////// Stop ESP /////////////////*/
-  if (!BMS_ign && ESP_on && !StayOn && (SpdSelect == 'P')) {  // When car is power off, call stop_esp which saves some data before powering ESP32 down
+  if (!BMS_ign && ESP_on && (SpdSelect == 'P') && data_ready) {  // When car is power off, call stop_esp which saves some data before powering ESP32 down
     record_code = 5;
     shutdown_esp = true;
     if (!SoC_saved) {
