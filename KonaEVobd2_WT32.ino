@@ -34,7 +34,8 @@ Adafruit_FT6206 ts = Adafruit_FT6206();
 
 #define Threshold 40 /* threshold for touch wakeup - Greater the value[, more the sensitivity */
 
-int ledBacklight = 80; // Initial TFT backlight intensity on a scale of 0 to 255. Initial value is 80.
+int ledBacklight = 120; // Initial TFT backlight intensity on a scale of 0 to 255. Initial value is 120.
+bool low_backlight = false;
 
 /*////// Setting PWM properties, do not change this! /////////*/
 const int pwmFreq = 5000;
@@ -169,8 +170,7 @@ float last_energy = 0.0;
 float last_time = 0.0;
 float last_odo = 0.0;
 int energy_array_index = 0;
-int array_size = N_km + 1;
-float energy_array[11];
+float energy_array[11]; //needs to hold 11 values in order to calculate last 10 energy values
 float span_energy = 0.0;
 float speed_interval = 0.0;
 float init_speed_timer = 0.0;
@@ -232,7 +232,7 @@ bool kWh_update = false;
 bool corr_update = false;
 bool ESP_on = false;
 bool DrawBackground = true;
-char titre[10][12];
+char titre[10][13];
 char value[10][7];
 char prev_value[10][7];
 bool negative_flag[10];
@@ -249,8 +249,8 @@ char* BtnAtext = "MAIN";
 char* BtnBtext = "BATT";
 char* BtnCtext = "POWER";
 char Maintitre[][13] = {"Consommation", "Batt. Info", "Puissance", "Set-Up"};
-uint16_t MainTitleColor = TFT_DARKGREY;
-uint16_t BtnOnColor = TFT_DARKCYAN;
+uint16_t MainTitleColor = TFT_WHITE;
+uint16_t BtnOnColor = TFT_GREEN;
 uint16_t BtnOffColor = TFT_LIGHTGREY;
 
 unsigned long initTouchTime = 0;
@@ -259,7 +259,6 @@ bool TouchLatch = false;
 bool Btn1SetON = true;
 bool Btn2SetON = false;
 bool Btn3SetON = false;
-bool buttonReleased = true;
 
 struct RoundedRect {
   int xStart;
@@ -331,6 +330,7 @@ RoundedRect btnCoff = {
   BtnCtext
 };
 
+/*///////ESP shutdown variables///////*/
 unsigned long ESPinitTimer = 0;
 unsigned long ESPTimer = 0;
 unsigned long ESPTimerInterval = 1200;  // time in seconds to turn off ESP when it power-up during 12V battery charge cycle.
@@ -341,7 +341,7 @@ bool send_enabled = false;
 bool send_data = false;
 bool data_sent = false;
 int nbParam = 76;  //number of parameters to send to Google Sheet
-unsigned long sendInterval = 5000;
+unsigned long sendInterval = 5000;  // in millisec
 unsigned long currentTimer = 0;
 unsigned long previousTimer = 0;
 bool sendIntervalOn = false;
@@ -350,8 +350,6 @@ const char* resource = "/trigger/SendData/with/key/bWQadqBNOh1P3PINCC1_Vr";  // 
 
 // Maker Webhooks IFTTT
 const char* server = "maker.ifttt.com";
-
-static bool flag = false;
 
 /*////// Variables for OBD data timing ////////////*/
 unsigned long currentMillis;       // timing variable to sample OBD data
@@ -369,6 +367,7 @@ dataFrames results;                           // this struct will hold the resul
 void callback(){  //required function for touch wake
   //placeholder callback function
 }
+
 
 /*////////////////////////////////////////////////////////////////////////*/
 /*                         START OF SETUP                                 */
@@ -1435,122 +1434,6 @@ void makeIFTTTRequest(void * pvParameters){
   }
 }
 
-//--------------------------------------------------------------------------------------------
-//                        Button functions
-//--------------------------------------------------------------------------------------------
-
-void drawRoundedRect(RoundedRect toDraw){
-  tft.fillRoundRect(
-    toDraw.xStart,
-    toDraw.yStart,
-    toDraw.xWidth, 
-    toDraw.yHeight, 
-    toDraw.cornerRadius,
-    toDraw.color
-  );
-  
-  int box1TextX = toDraw.xStart + (toDraw.xWidth / 2);
-  int box1TextY = toDraw.yStart + (toDraw.yHeight / 2);
-  tft.setCursor(box1TextX, box1TextY);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextPadding(toDraw.xWidth);
-  tft.setFreeFont(&FreeSans9pt7b);
-  tft.setTextSize(1);
-  tft.setTextColor(TFT_BLACK,toDraw.color);  
-  tft.drawString(toDraw.BtnText, box1TextX, box1TextY);    
-}
-
-void button(){
-  if (ts.touched()) {
-    p = ts.getPoint();
-    x = p.x;
-    y = p.y;
-          
-    //Button 1 test
-    if ((x >= btnAon.xStart && x <= btnAon.xStart + btnAon.xWidth) && (y >= btnAon.yStart && y <= btnAon.yStart + btnAon.yHeight)) {      
-      TouchTime = (millis() - initTouchTime) / 1000;      
-      if (TouchTime > 4 & !TouchLatch){
-        Serial.println("Button1 Long Press");
-        TouchLatch = true;        
-        InitRst = true;            
-        PrevSoC = 0;
-      }            
-      if (!Btn1SetON)
-      {  
-          screenNbr = 0;
-          Serial.println("Button1 Touched");        
-          Serial.println("Button1 set to ON");          
-          DrawBackground = true;                 
-          Btn1SetON = true;
-        if (Btn2SetON){
-          Btn2SetON = false;        
-        }
-        if (Btn3SetON){
-          Btn3SetON = false;        
-        }
-      }   
-    } 
-        
-    //Button 2 test
-    if ((x >= btnBon.xStart && x <= btnBon.xStart + btnBon.xWidth) && (y >= btnBon.yStart && y <= btnBon.yStart + btnBon.yHeight)) {      
-      TouchTime = (millis() - initTouchTime) / 1000;
-      if (TouchTime >= 4 & !TouchLatch){
-        TouchLatch = true;        
-        Serial.println("Button2 Long Press");
-        Serial.print("Setting PWM for TFT backlight to default intensity... ");
-        ledcWrite(pwmLedChannelTFT, 40);
-        Serial.println("DONE");        
-        Btn2SetON = true;
-      }
-      if (!Btn2SetON)
-      {            
-        screenNbr = 1;
-        Serial.println("Button2 Touched");        
-        Serial.println("Button2 set to ON");        
-        DrawBackground = true;        
-        Btn2SetON = true; 
-        if (Btn1SetON){ 
-          Btn1SetON = false;        
-        }
-        if (Btn3SetON){ 
-          Btn3SetON = false;        
-        }       
-      }           
-    }
-
-    //Button 3 test
-    if ((x >= btnCon.xStart && x <= btnCon.xStart + btnCon.xWidth) && (y >= btnCon.yStart && y <= btnCon.yStart + btnCon.yHeight)) {      
-      TouchTime = (millis() - initTouchTime) / 1000;
-      if (TouchTime >= 4 & !TouchLatch){
-        TouchLatch = true;        
-        Serial.println("Button3 Long Press");
-        screenNbr = 3;
-        DrawBackground = true;        
-        Btn3SetON = true;
-      }
-      if (!Btn3SetON)
-      {            
-        screenNbr = 2;
-        Serial.println("Button3 Touched");        
-        Serial.println("Button3 set to ON");        
-        DrawBackground = true;        
-        Btn3SetON = true;              
-        if (Btn1SetON){
-          Btn1SetON = false;        
-        }
-        if (Btn2SetON){
-          Btn2SetON = false;       
-        }
-      }      
-    }
-  }
-  else{
-    initTouchTime = millis();
-    TouchLatch = false;    
-    buttonReleased = true;      
-  }
-}
-
 /*////////////// Full Trip Reset ///////////////// */
 
 void reset_trip() {  //Overall trip reset. Automatic if the car has been recharged to the same level as previous charge or if left button is pressed for more then 3 secondes
@@ -1760,6 +1643,133 @@ void stop_esp() {
 }
 
 //--------------------------------------------------------------------------------------------
+//                   Touch Button Handling Function
+//--------------------------------------------------------------------------------------------
+
+void button(){
+  if (ts.touched()) {
+    p = ts.getPoint();
+    x = p.x;
+    y = p.y;
+          
+    //Button 1 test
+    if ((x >= btnAon.xStart && x <= btnAon.xStart + btnAon.xWidth) && (y >= btnAon.yStart && y <= btnAon.yStart + btnAon.yHeight)) {      
+      TouchTime = (millis() - initTouchTime) / 1000;      
+      if (TouchTime >= 3 & !TouchLatch){
+        Serial.println("Button1 Long Press");
+        TouchLatch = true;        
+        InitRst = true;            
+        PrevSoC = 0;
+      }            
+      if (!Btn1SetON)
+      {  
+          screenNbr = 0;
+          Serial.println("Button1 Touched");        
+          Serial.println("Button1 set to ON");          
+          DrawBackground = true;                 
+          Btn1SetON = true;
+        if (Btn2SetON){
+          Btn2SetON = false;        
+        }
+        if (Btn3SetON){
+          Btn3SetON = false;        
+        }
+      }   
+    } 
+        
+    //Button 2 test
+    if ((x >= btnBon.xStart && x <= btnBon.xStart + btnBon.xWidth) && (y >= btnBon.yStart && y <= btnBon.yStart + btnBon.yHeight)) {      
+      TouchTime = (millis() - initTouchTime) / 1000;
+      if (TouchTime >= 3 & !TouchLatch){
+        TouchLatch = true;        
+        Serial.println("Button2 Long Press");
+        if (!low_backlight){
+          ledcWrite(pwmLedChannelTFT, 80);
+          low_backlight = true;
+        }
+        else{
+          ledcWrite(pwmLedChannelTFT, 120);
+          low_backlight = false;
+        }
+        
+        Serial.println("DONE");        
+        Btn2SetON = true;
+      }
+      if (!Btn2SetON)
+      {            
+        screenNbr = 1;
+        Serial.println("Button2 Touched");        
+        Serial.println("Button2 set to ON");        
+        DrawBackground = true;        
+        Btn2SetON = true; 
+        if (Btn1SetON){ 
+          Btn1SetON = false;        
+        }
+        if (Btn3SetON){ 
+          Btn3SetON = false;        
+        }       
+      }           
+    }
+
+    //Button 3 test
+    if ((x >= btnCon.xStart && x <= btnCon.xStart + btnCon.xWidth) && (y >= btnCon.yStart && y <= btnCon.yStart + btnCon.yHeight)) {      
+      TouchTime = (millis() - initTouchTime) / 1000;
+      if (TouchTime >= 3 & !TouchLatch){
+        TouchLatch = true;        
+        Serial.println("Button3 Long Press");
+        screenNbr = 3;
+        DrawBackground = true;        
+        Btn3SetON = true;
+      }
+      if (!Btn3SetON)
+      {            
+        screenNbr = 2;
+        Serial.println("Button3 Touched");        
+        Serial.println("Button3 set to ON");        
+        DrawBackground = true;        
+        Btn3SetON = true;              
+        if (Btn1SetON){
+          Btn1SetON = false;        
+        }
+        if (Btn2SetON){
+          Btn2SetON = false;       
+        }
+      }      
+    }
+  }
+  else{
+    initTouchTime = millis();
+    TouchLatch = false;
+  }
+}
+
+
+//--------------------------------------------------------------------------------------------
+//                        Button Draw function
+//--------------------------------------------------------------------------------------------
+
+void drawRoundedRect(RoundedRect toDraw){
+  tft.fillRoundRect(
+    toDraw.xStart,
+    toDraw.yStart,
+    toDraw.xWidth, 
+    toDraw.yHeight, 
+    toDraw.cornerRadius,
+    toDraw.color
+  );
+  
+  int box1TextX = toDraw.xStart + (toDraw.xWidth / 2);
+  int box1TextY = toDraw.yStart + (toDraw.yHeight / 2);
+  tft.setCursor(box1TextX, box1TextY);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextPadding(toDraw.xWidth);
+  tft.setFreeFont(&FreeSans9pt7b);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_BLACK,toDraw.color);  
+  tft.drawString(toDraw.BtnText, box1TextX, box1TextY);    
+}
+
+//--------------------------------------------------------------------------------------------
 //                   Format Displays in Pages
 //--------------------------------------------------------------------------------------------
 
@@ -1931,22 +1941,22 @@ void page1() {
 void page2() {
 
   strcpy(titre[0], "SoC");
-  strcpy(titre[1], "MIN_Temp");
+  strcpy(titre[1], "Calc_Left");
   strcpy(titre[2], "MAXcellv");
   strcpy(titre[3], "SOH");
   strcpy(titre[4], "Full_Ah");
   strcpy(titre[5], "BmsSoC");
-  strcpy(titre[6], "MAX_Temp");
+  strcpy(titre[6], "BATTv");
   strcpy(titre[7], "CellVdiff");
   strcpy(titre[8], "Det_Total");
   strcpy(titre[9], "12V_SoC");
   value_float[0] = SoC;
-  value_float[1] = BattMinT;
-  value_float[2] = MAXcellv;
+  value_float[1] = left_kwh;
+  value_float[2] = BATTv;
   value_float[3] = SOH;
   value_float[4] = EstFull_Ah;
   value_float[5] = BmsSoC;
-  value_float[6] = BattMaxT;
+  value_float[6] = BATTv;
   value_float[7] = CellVdiff;
   value_float[8] = Deter_Min;
   value_float[9] = AuxBattSoC;
@@ -2009,11 +2019,15 @@ void page3() {
 }
 /*///////////////// End of Display Page 3 //////////////////////*/
 
+
 /*///////////////////////////////////////////////////////////////////////*/
 /*                     START OF LOOP                                     */
 /*///////////////////////////////////////////////////////////////////////*/
 
-void loop() {  
+void loop() { 
+
+  /*/////// Read each OBDII PIDs /////////////////*/     
+  read_data();
 
   /*/////// Test touch button /////////////////*/
   button();
@@ -2039,10 +2053,6 @@ void loop() {
     tft.fillCircle(20, 20, 6,TFT_BLACK);
   }  
   
-  /*/////// Read each OBDII PIDs /////////////////*/ 
-    
-  read_data();
-
   /*/////// Display Page Number /////////////////*/
 
   if (!SetupOn && (ESP_on || (Power < 0))) {
