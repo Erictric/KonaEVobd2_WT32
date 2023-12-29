@@ -27,13 +27,13 @@ void ConnectWifi(TFT_eSPI& tft){
   tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 + 50);
   
   int retries = 0; 
-  while (wifiMulti.run() != WL_CONNECTED  && (retries++ < 10)) { // 2 attempts 
+  while (wifiMulti.run() != WL_CONNECTED  && (retries++ < 8)) { // 2 attempts 
     dtostrf(retries,1,0,strRetries);        
     Serial.print("attempts: ");Serial.println(retries);
     tft.fillScreen(TFT_BLACK);
     tft.drawString("Retry", tft.width() / 2, tft.height() / 2 - 50);
     tft.drawString(strRetries, tft.width() / 2, tft.height() / 2);
-    delay(500);
+    delay(1000);
   }
   Serial.println("");
 

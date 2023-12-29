@@ -33,9 +33,14 @@ TFT_eSPI tft = TFT_eSPI();
 Adafruit_FT6206 ts = Adafruit_FT6206();
 
 #define Threshold 40 /* threshold for touch wakeup - Greater the value[, more the sensitivity */
+#define ST7789_DISPOFF    0x28
+#define ST7789_DISPON   0x29
+#define ST7789_SLPIN    0x10
+#define ST7789_SLPOUT   0x11
 
-int ledBacklight = 120; // Initial TFT backlight intensity on a scale of 0 to 255. Initial value is 120.
+int ledBacklight = 150; // Initial TFT backlight intensity on a scale of 0 to 255. Initial value is 120.
 bool low_backlight = false;
+bool display_off = false;
 
 /*////// Setting PWM properties, do not change this! /////////*/
 const int pwmFreq = 5000;
@@ -45,13 +50,12 @@ const int pwmLedChannelTFT = 0;
 //RTC_DATA_ATTR int bootCount = 0;
 
 //TFT y positions for texts and numbers
-float textLvl[10] = {70, 140, 210, 280, 350, 70, 140, 210, 280, 350};  // y coordinates for text
-float drawLvl[10] = {105, 175, 245, 315, 385, 105, 175, 245, 315, 385}; // and numbers
+float textLvl[10] = {65, 135, 205, 275, 345, 65, 135, 205, 275, 345};  // y coordinates for text
+float drawLvl[10] = {100, 170, 240, 310, 380, 100, 170, 240, 310, 380}; // and numbers
 
 #define pagenumbers 7  // number of pages to display
 #define N_km 10        //variable for the calculating kWh/100km over a N_km
 
-const int VESSoff = 12;
 boolean SelectOn = true;
 unsigned long StartMillis;
 unsigned long ToggleDelay = 1000;
@@ -117,6 +121,8 @@ byte Drive;
 char selector[1];
 byte StatusWord;
 byte BMS_ign;
+byte StatusWord2;
+byte BMS_relay;
 float OPtimemins;
 float OPtimehours;
 float TireFL_P;
@@ -203,6 +209,8 @@ float PIDkWh_100;
 float Est_range;
 float Est_range2;
 float Est_range3;
+unsigned long RangeCalcTimer;
+uint32_t  RangeCalcUpdate = 2000; 
 float acc_kWh_25;
 float acc_kWh_10;
 float acc_kWh_0;
@@ -240,15 +248,17 @@ float value_float[10];
 int nbr_decimal[10];
 bool Charge_page = false;
 bool Power_page = false;
+unsigned long read_timer;
+uint32_t read_data_interval = 2000;
 
 // Variables for touch x,y
 static int32_t x, y;
 TS_Point p;
 static int xMargin = 20, yMargin = 420, margin = 20, btnWidth = 80, btnHeigth = 55;
-char* BtnAtext = "MAIN";
+char* BtnAtext = "CONS";
 char* BtnBtext = "BATT";
 char* BtnCtext = "POWER";
-char Maintitre[][13] = {"Consommation", "Batt. Info", "Puissance", "Set-Up"};
+char Maintitre[][13] = {"Consommation", "Batt. Info", "Energie", "Set-Up"};
 uint16_t MainTitleColor = TFT_WHITE;
 uint16_t BtnOnColor = TFT_GREEN;
 uint16_t BtnOffColor = TFT_LIGHTGREY;
@@ -397,6 +407,14 @@ void setup() {
   
   /*//////////////Initialise OLED display ////////////////*/
   tft.init();
+  tft.setRotation(0);  // 0 & 2 Portrait. 1 & 3 landscape
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_GREEN);
+  tft.setCursor(0, 0);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextSize(2);
+  tft.setFreeFont(&FreeSans9pt7b);
+
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, 128);
 
@@ -408,17 +426,6 @@ void setup() {
   Serial.print("Setting PWM for TFT backlight to default intensity... ");
   ledcWrite(pwmLedChannelTFT, ledBacklight);
   Serial.println("DONE");
-
-  tft.begin();
-  tft.setRotation(0);  // 0 & 2 Portrait. 1 & 3 landscape
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_GREEN);
-  tft.setCursor(0, 0);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextSize(2);
-  tft.setFreeFont(&FreeSans9pt7b);   
-
-  //pinMode(VESSoff, OUTPUT); // enable output pin that activate a relay to temporary disable the VESS
 
   /*////// initialize EEPROM with predefined size ////////*/
   EEPROM.begin(148);
@@ -492,9 +499,8 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
       send_enabled = true;
     }
-  }
-
-  initscan = true;  // To write header name on Google Sheet on power up
+    initscan = true;  // To write header name on Google Sheet on power up
+  }  
 
   /*//////////////Initialise Task on core0 to send data on Google Sheet ////////////////*/
 
@@ -511,6 +517,8 @@ void setup() {
   tft.fillScreen(TFT_BLACK);
 
   integrate_timer = millis() / 1000;
+  RangeCalcTimer = millis();
+  read_timer = millis();
 
   nbr_powerOn += 1;
   EEPROM.writeFloat(40, nbr_powerOn);
@@ -600,8 +608,7 @@ void read_data() {
   myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
 
   if (myELM327.queryPID("220101")) {  // Service and Message PID = hex 22 0101 => dec 34, 257
-    Serial.println("read PID101");
-
+   
     char* payload = myELM327.payload;
     size_t payloadLen = myELM327.recBytes;
 
@@ -635,6 +642,8 @@ void read_data() {
     BmsSoC = convertToInt(results.frames[1], 2, 1) * 0.5;
     StatusWord = convertToInt(results.frames[7], 6, 1);  // Extract byte that contain BMS status bits
     BMS_ign = bitRead(StatusWord, 2);
+    StatusWord2 = convertToInt(results.frames[1], 7, 1);  // Extract byte that contain BMS status bits
+    BMS_relay = bitRead(StatusWord2, 0);
     MAXcellv = convertToInt(results.frames[3], 7, 1) * 0.02;
     MAXcellvNb = convertToInt(results.frames[4], 1, 1);
     MINcellv = convertToInt(results.frames[4], 2, 1) * 0.02;
@@ -648,163 +657,164 @@ void read_data() {
   UpdateNetEnergy();
   pwr_changed += 1;
   
-  // Read remaining PIDs
-  switch (pid_counter) {
-    case 1:
-
-      button();
-      myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
-      Serial.println("read PID105");
-
-      if (myELM327.queryPID("220105")) {  // Service and Message PID = hex 22 0105 => dec 34, 261
-        char* payload = myELM327.payload;
-        size_t payloadLen = myELM327.recBytes;
-
-        processPayload(payload, payloadLen, results);
-        Max_Pwr = convertToInt(results.frames[3], 2, 2) * 0.01;
-        Max_Reg = (((convertToInt(results.frames[2], 7, 1)) << 8) + convertToInt(results.frames[3], 1, 1)) * 0.01;
-        SoC = convertToInt(results.frames[5], 1, 1) * 0.5;
-        SOH = convertToInt(results.frames[4], 2, 2) * 0.1;
-        MaxDetNb = convertToInt(results.frames[4], 4, 1);
-        MinDetNb = convertToInt(results.frames[4], 7, 1);
-        Deter_Min = convertToInt(results.frames[4], 5, 2) * 0.1;
-        int HeaterRaw = convertToInt(results.frames[3], 7, 1);
-        if (HeaterRaw > 127) {  //conversition for negative value[
-          Heater = -1 * (256 - HeaterRaw);
-        } else {
-          Heater = HeaterRaw;
+  if (BMS_relay){
+  // Read remaining PIDs only if BMS relay is ON
+    switch (pid_counter) {
+      case 1:
+  
+        button();
+        myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
+        Serial.println("read PID105");
+  
+        if (myELM327.queryPID("220105")) {  // Service and Message PID = hex 22 0105 => dec 34, 261
+          char* payload = myELM327.payload;
+          size_t payloadLen = myELM327.recBytes;
+  
+          processPayload(payload, payloadLen, results);
+          Max_Pwr = convertToInt(results.frames[3], 2, 2) * 0.01;
+          Max_Reg = (((convertToInt(results.frames[2], 7, 1)) << 8) + convertToInt(results.frames[3], 1, 1)) * 0.01;
+          SoC = convertToInt(results.frames[5], 1, 1) * 0.5;
+          SOH = convertToInt(results.frames[4], 2, 2) * 0.1;
+          MaxDetNb = convertToInt(results.frames[4], 4, 1);
+          MinDetNb = convertToInt(results.frames[4], 7, 1);
+          Deter_Min = convertToInt(results.frames[4], 5, 2) * 0.1;
+          int HeaterRaw = convertToInt(results.frames[3], 7, 1);
+          if (HeaterRaw > 127) {  //conversition for negative value[
+            Heater = -1 * (256 - HeaterRaw);
+          } else {
+            Heater = HeaterRaw;
+          }
         }
-      }
-      break;
-
-    case 2:
-
-      button();
-      myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
-
-      if (myELM327.queryPID("220106")) {  // Service and Message PID = hex 22 0106 => dec 34, 262
-        char* payload = myELM327.payload;
-        size_t payloadLen = myELM327.recBytes;
-
-        processPayload(payload, payloadLen, results);
-        int COOLtempRaw = convertToInt(results.frames[1], 2, 1) * 0.01;  // Cooling water temperature
-        if (COOLtempRaw > 127) {                                         //conversition for negative value[
-          COOLtemp = -1 * (256 - COOLtempRaw);
-        } else {
-          COOLtemp = COOLtempRaw;
+        break;
+  
+      case 2:
+  
+        button();
+        myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
+  
+        if (myELM327.queryPID("220106")) {  // Service and Message PID = hex 22 0106 => dec 34, 262
+          char* payload = myELM327.payload;
+          size_t payloadLen = myELM327.recBytes;
+  
+          processPayload(payload, payloadLen, results);
+          int COOLtempRaw = convertToInt(results.frames[1], 2, 1) * 0.01;  // Cooling water temperature
+          if (COOLtempRaw > 127) {                                         //conversition for negative value[
+            COOLtemp = -1 * (256 - COOLtempRaw);
+          } else {
+            COOLtemp = COOLtempRaw;
+          }
         }
-      }
-      break;
-
-    case 3:
-      
-      button();
-      myELM327.sendCommand("AT SH 7E2");  // Set Header for Vehicle Control Unit
-
-      if (myELM327.queryPID("2101")) {  // Service and Message PID
-        char* payload = myELM327.payload;
-        size_t payloadLen = myELM327.recBytes;
-
-        processPayload(payload, payloadLen, results);
-        TransSelByte = convertToInt(results.frames[1], 2, 1);  // Extract byte that contain transmission selection bits
-        //Serial.print("SelByte: "); Serial.println(TransSelByte, 1);
-        Park = bitRead(TransSelByte, 0);
-        Reverse = bitRead(TransSelByte, 1);
-        Neutral = bitRead(TransSelByte, 2);
-        Drive = bitRead(TransSelByte, 3);
-
-        if (Park) selector[0] = 'P';
-        if (Reverse) selector[0] = 'R';
-        if (Neutral) selector[0] = 'N';
-        if (Drive) selector[0] = 'D';
-        SpdSelect = selector[0];
-      }
-      break;
-
-    case 4:
-      
-      button();
-      myELM327.sendCommand("AT SH 7E2");  // Set Header for Vehicle Control Unit
-      if (myELM327.queryPID("2102")) {    // Service and Message PID
-        char* payload = myELM327.payload;
-        size_t payloadLen = myELM327.recBytes;
-
-        processPayload(payload, payloadLen, results);
-        //AuxBattV = convertToInt(results.frames[3], 2, 2)* 0.001; //doesn't work...
-        int AuxCurrByte1 = convertToInt(results.frames[3], 4, 1);
-        int AuxCurrByte2 = convertToInt(results.frames[3], 5, 1);
-        if (AuxCurrByte1 > 127) {  // the most significant bit is the sign bit so need to calculate commplement value[ if true
-          AuxBattC = -1 * (((255 - AuxCurrByte1) * 256) + (256 - AuxCurrByte2)) * 0.01;
-        } else {
-          AuxBattC = ((AuxCurrByte1 * 256) + AuxCurrByte2) * 0.01;
+        break;
+  
+      case 3:
+        
+        button();
+        myELM327.sendCommand("AT SH 7E2");  // Set Header for Vehicle Control Unit
+  
+        if (myELM327.queryPID("2101")) {  // Service and Message PID
+          char* payload = myELM327.payload;
+          size_t payloadLen = myELM327.recBytes;
+  
+          processPayload(payload, payloadLen, results);
+          TransSelByte = convertToInt(results.frames[1], 2, 1);  // Extract byte that contain transmission selection bits
+          //Serial.print("SelByte: "); Serial.println(TransSelByte, 1);
+          Park = bitRead(TransSelByte, 0);
+          Reverse = bitRead(TransSelByte, 1);
+          Neutral = bitRead(TransSelByte, 2);
+          Drive = bitRead(TransSelByte, 3);
+  
+          if (Park) selector[0] = 'P';
+          if (Reverse) selector[0] = 'R';
+          if (Neutral) selector[0] = 'N';
+          if (Drive) selector[0] = 'D';
+          SpdSelect = selector[0];
         }
-        AuxBattSoC = convertToInt(results.frames[3], 6, 1);
-      }
-      break;
-
-    case 5:
-      
-      button();
-      myELM327.sendCommand("AT SH 7C6");  // Set Header for CLU Cluster Module
-      if (myELM327.queryPID("22B002")) {  // Service and Message PID
-        char* payload = myELM327.payload;
-        size_t payloadLen = myELM327.recBytes;
-
-        processPayload(payload, payloadLen, results);
-        Odometer = convertToInt(results.frames[1], 4, 3);
-      }
-      break;
-
-    case 6:
-
-      button();
-      myELM327.sendCommand("AT SH 7B3");  //Set Header Aircon
-      if (myELM327.queryPID("220100")) {  // Service and Message PID
-        char* payload = myELM327.payload;
-        size_t payloadLen = myELM327.recBytes;
-
-        processPayload(payload, payloadLen, results);
-        INDOORtemp = (((convertToInt(results.frames[1], 3, 1)) * 0.5) - 40);
-        OUTDOORtemp = (((convertToInt(results.frames[1], 4, 1)) * 0.5) - 40);
-      }
-      break;
-
-    case 7:
-
-      button();
-      myELM327.sendCommand("AT SH 7D4");  //Set Speed Header
-      if (myELM327.queryPID("220101")) {  // Service and Message PID
-        char* payload = myELM327.payload;
-        size_t payloadLen = myELM327.recBytes;
-
-        processPayload(payload, payloadLen, results);
-        Speed = (((convertToInt(results.frames[1], 7, 1)) << 8) + convertToInt(results.frames[2], 1, 1)) * 0.1;
-      }
-      Integrat_speed();
-      break;
-
-    case 8:
-
-      button();
-      myELM327.sendCommand("AT SH 7A0");  //Set BCM Header
-      if (myELM327.queryPID("22C00B")) {  // Service and Message PID
-        char* payload = myELM327.payload;
-        size_t payloadLen = myELM327.recBytes;
-
-        processPayload(payload, payloadLen, results);
-        TireFL_P = convertToInt(results.frames[1], 2, 1) * 0.2;
-        TireFL_T = convertToInt(results.frames[1], 3, 1) - 50;
-        TireFR_P = convertToInt(results.frames[1], 6, 1) * 0.2;
-        TireFR_T = convertToInt(results.frames[1], 7, 1) - 50;
-        TireRL_P = convertToInt(results.frames[2], 7, 1) * 0.2;
-        TireRL_T = convertToInt(results.frames[3], 1, 1) - 50;
-        TireRR_P = convertToInt(results.frames[2], 3, 1) * 0.2;
-        TireRR_T = convertToInt(results.frames[2], 4, 1) - 50;
-      }
-      pid_counter = 0;
-      data_ready = true;  // after all PIDs have been read, turn on flag for valid value from OBD2
-      break;
-  }
+        break;
+  
+      case 4:
+        
+        button();
+        myELM327.sendCommand("AT SH 7E2");  // Set Header for Vehicle Control Unit
+        if (myELM327.queryPID("2102")) {    // Service and Message PID
+          char* payload = myELM327.payload;
+          size_t payloadLen = myELM327.recBytes;
+  
+          processPayload(payload, payloadLen, results);
+          //AuxBattV = convertToInt(results.frames[3], 2, 2)* 0.001; //doesn't work...
+          int AuxCurrByte1 = convertToInt(results.frames[3], 4, 1);
+          int AuxCurrByte2 = convertToInt(results.frames[3], 5, 1);
+          if (AuxCurrByte1 > 127) {  // the most significant bit is the sign bit so need to calculate commplement value[ if true
+            AuxBattC = -1 * (((255 - AuxCurrByte1) * 256) + (256 - AuxCurrByte2)) * 0.01;
+          } else {
+            AuxBattC = ((AuxCurrByte1 * 256) + AuxCurrByte2) * 0.01;
+          }
+          AuxBattSoC = convertToInt(results.frames[3], 6, 1);
+        }
+        break;
+  
+      case 5:
+        
+        button();
+        myELM327.sendCommand("AT SH 7C6");  // Set Header for CLU Cluster Module
+        if (myELM327.queryPID("22B002")) {  // Service and Message PID
+          char* payload = myELM327.payload;
+          size_t payloadLen = myELM327.recBytes;
+  
+          processPayload(payload, payloadLen, results);
+          Odometer = convertToInt(results.frames[1], 4, 3);
+        }
+        break;
+  
+      case 6:
+  
+        button();
+        myELM327.sendCommand("AT SH 7B3");  //Set Header Aircon
+        if (myELM327.queryPID("220100")) {  // Service and Message PID
+          char* payload = myELM327.payload;
+          size_t payloadLen = myELM327.recBytes;
+  
+          processPayload(payload, payloadLen, results);
+          INDOORtemp = (((convertToInt(results.frames[1], 3, 1)) * 0.5) - 40);
+          OUTDOORtemp = (((convertToInt(results.frames[1], 4, 1)) * 0.5) - 40);
+        }
+        break;
+  
+      case 7:
+  
+        button();
+        myELM327.sendCommand("AT SH 7D4");  //Set Speed Header
+        if (myELM327.queryPID("220101")) {  // Service and Message PID
+          char* payload = myELM327.payload;
+          size_t payloadLen = myELM327.recBytes;
+  
+          processPayload(payload, payloadLen, results);
+          Speed = (((convertToInt(results.frames[1], 7, 1)) << 8) + convertToInt(results.frames[2], 1, 1)) * 0.1;
+        }
+        Integrat_speed();
+        break;
+  
+      case 8:
+  
+        button();
+        myELM327.sendCommand("AT SH 7A0");  //Set BCM Header
+        if (myELM327.queryPID("22C00B")) {  // Service and Message PID
+          char* payload = myELM327.payload;
+          size_t payloadLen = myELM327.recBytes;
+  
+          processPayload(payload, payloadLen, results);
+          TireFL_P = convertToInt(results.frames[1], 2, 1) * 0.2;
+          TireFL_T = convertToInt(results.frames[1], 3, 1) - 50;
+          TireFR_P = convertToInt(results.frames[1], 6, 1) * 0.2;
+          TireFR_T = convertToInt(results.frames[1], 7, 1) - 50;
+          TireRL_P = convertToInt(results.frames[2], 7, 1) * 0.2;
+          TireRL_T = convertToInt(results.frames[3], 1, 1) - 50;
+          TireRR_P = convertToInt(results.frames[2], 3, 1) * 0.2;
+          TireRR_T = convertToInt(results.frames[2], 4, 1) - 50;
+        }
+        pid_counter = 0;
+        data_ready = true;  // after all PIDs have been read, turn on flag for valid value from OBD2
+        break;
+    }
 
 
   /////// Miscellaneous calculations /////////
@@ -814,147 +824,152 @@ void read_data() {
   Integrat_current();
   integrate_timer = millis();
 
-  if (!ResetOn) {  // On power On, wait for current trip value to be re-initialized before executing the next lines of code
-    TripOdo = Odometer - InitOdo;
-
-    CurrTripOdo = Odometer - CurrInitOdo;
-
-    CurrOPtime = OPtimemins - CurrTimeInit;
-
-    TripOPtime = CurrOPtime + PrevOPtimemins;
-
-    UsedSoC = InitSoC - SoC;
-
-    CurrUsedSoC = CurrInitSoC - SoC;
-
-    if (UsedSoC < 0.5){
-      EstFull_Ah = 186;
-    }
-    else{
-      EstFull_Ah = 100 * Net_Ah / UsedSoC;
-    }
-
-    CellVdiff = MAXcellv - MINcellv;
-    
-    if (PrevBmsSoC > BmsSoC) {  // perform a BmsSoC vs SoC ratio calculation when BmsSoC changes
-      PrevBmsSoC = BmsSoC;
-      SocRatioCalc();
-    }
-    else if (PrevBmsSoC < 0){
-      PrevBmsSoC = BmsSoC;
-    }
-
-    if (PrevSoC != SoC) {  // perform "used_kWh" and "left_kWh" when SoC changes
-      if (InitRst) {       // On Button Trip reset, initial kWh calculation
-        Serial.print("1st Reset");
-        initscan = true;
-        record_code = 2;
-        reset_trip();        
-        kWh_corr = 0;
-        PrevSoC = SoC;
-        Prev_kWh = Net_kWh;
-        used_kwh = calc_kwh(SoC, InitSoC);
-        left_kwh = calc_kwh(0, SoC);
-        initscan = true;
-        InitRst = false;
+    if (!ResetOn) {  // On power On, wait for current trip value to be re-initialized before executing the next lines of code
+      TripOdo = Odometer - InitOdo;
+  
+      CurrTripOdo = Odometer - CurrInitOdo;
+  
+      CurrOPtime = OPtimemins - CurrTimeInit;
+  
+      TripOPtime = CurrOPtime + PrevOPtimemins;
+  
+      UsedSoC = InitSoC - SoC;
+  
+      CurrUsedSoC = CurrInitSoC - SoC;
+  
+      if (UsedSoC < 0.5){
+        EstFull_Ah = 186;
       }
-      if (!InitRst) {  // kWh calculation when the Initial reset is not active
-        // After a Trip Reset, perform a new reset if SoC changed without a Net_kWh increase (in case SoC was just about to change when the reset was performed)
-        if (((acc_energy < 0.25) && (PrevSoC > SoC)) || ((SoC > 98.5) && ((PrevSoC - SoC) > 0.5))) {
-          //if(((Net_kWh < 0.3) && (PrevSoC > SoC)) || ((SoC > 98.5) && ((PrevSoC - SoC) > 0.5)) || (TrigRst && (PrevSoC > SoC))){          
-          if ((acc_energy < 0.3) && (PrevSoC > SoC)) {
-            initscan = true;
-            mem_energy = acc_energy;
-            mem_PrevSoC = PrevSoC;
-            mem_SoC = SoC;
-            record_code = 3;
-            Serial.print("2nd Reset");
-            reset_trip();           
+      else{
+        EstFull_Ah = 100 * Net_Ah / UsedSoC;
+      }
+  
+      CellVdiff = MAXcellv - MINcellv;
+      
+      if (PrevBmsSoC > BmsSoC) {  // perform a BmsSoC vs SoC ratio calculation when BmsSoC changes
+        PrevBmsSoC = BmsSoC;
+        SocRatioCalc();
+      }
+      else if (PrevBmsSoC < 0){
+        PrevBmsSoC = BmsSoC;
+      }
+  
+      if (PrevSoC != SoC) {  // perform "used_kWh" and "left_kWh" when SoC changes
+        if (InitRst) {       // On Button Trip reset, initial kWh calculation
+          Serial.print("1st Reset");
+          initscan = true;
+          record_code = 2;
+          reset_trip();        
+          kWh_corr = 0;
+          PrevSoC = SoC;
+          Prev_kWh = Net_kWh;
+          used_kwh = calc_kwh(SoC, InitSoC);
+          left_kwh = calc_kwh(0, SoC);
+          initscan = true;
+          InitRst = false;
+        }
+        if (!InitRst) {  // kWh calculation when the Initial reset is not active
+          // After a Trip Reset, perform a new reset if SoC changed without a Net_kWh increase (in case SoC was just about to change when the reset was performed)
+          if (((acc_energy < 0.25) && (PrevSoC > SoC)) || ((SoC > 98.5) && ((PrevSoC - SoC) > 0.5))) {
+            //if(((Net_kWh < 0.3) && (PrevSoC > SoC)) || ((SoC > 98.5) && ((PrevSoC - SoC) > 0.5)) || (TrigRst && (PrevSoC > SoC))){          
+            if ((acc_energy < 0.3) && (PrevSoC > SoC)) {
+              initscan = true;
+              mem_energy = acc_energy;
+              mem_PrevSoC = PrevSoC;
+              mem_SoC = SoC;
+              record_code = 3;
+              Serial.print("2nd Reset");
+              reset_trip();           
+              kWh_corr = 0;
+              used_kwh = calc_kwh(SoC, InitSoC);
+              left_kwh = calc_kwh(0, SoC);
+              PrevSoC = SoC;
+              Prev_kWh = Net_kWh;
+              kWh_update = true;
+            } else {
+              record_code = 4;
+            }
+  
+          } else if (((PrevSoC > SoC) && ((PrevSoC - SoC) < 1)) || ((PrevSoC < SoC) && (SpdSelect == 'P'))) {  // Normal kWh calculation when SoC decreases and exception if a 0 gitch in SoC data
             kWh_corr = 0;
             used_kwh = calc_kwh(SoC, InitSoC);
             left_kwh = calc_kwh(0, SoC);
             PrevSoC = SoC;
             Prev_kWh = Net_kWh;
             kWh_update = true;
-          } else {
-            record_code = 4;
-          }
-
-        } else if (((PrevSoC > SoC) && ((PrevSoC - SoC) < 1)) || ((PrevSoC < SoC) && (SpdSelect == 'P'))) {  // Normal kWh calculation when SoC decreases and exception if a 0 gitch in SoC data
-          kWh_corr = 0;
-          used_kwh = calc_kwh(SoC, InitSoC);
-          left_kwh = calc_kwh(0, SoC);
-          PrevSoC = SoC;
-          Prev_kWh = Net_kWh;
-          kWh_update = true;
-
-          if ((used_kwh >= 2) && (SpdSelect == 'D')) {  // Wait till 2 kWh has been used to start calculating ratio to have a better accuracy
-            degrad_ratio = Net_kWh / used_kwh;
-            old_lost = degrad_ratio;
-          } else {
-            degrad_ratio = old_lost;
-            if ((degrad_ratio > 1.2) || (degrad_ratio < 0.8)) {  // if a bad value[ got saved previously, initialize ratio to 1
-              degrad_ratio = 1;
+  
+            if ((used_kwh >= 2) && (SpdSelect == 'D')) {  // Wait till 2 kWh has been used to start calculating ratio to have a better accuracy
+              degrad_ratio = Net_kWh / used_kwh;
+              old_lost = degrad_ratio;
+            } else {
+              degrad_ratio = old_lost;
+              if ((degrad_ratio > 1.2) || (degrad_ratio < 0.8)) {  // if a bad value[ got saved previously, initialize ratio to 1
+                degrad_ratio = 1;
+              }
             }
           }
         }
-      }
-
-    } else if ((Prev_kWh < Net_kWh) && !kWh_update) {  // since the SoC has only 0.5 kWh resolution, when the Net_kWh increases, a 0.1 kWh is added to the kWh calculation to interpolate until next SoC change.
-      kWh_corr += 0.1;
-      used_kwh = calc_kwh(PrevSoC, InitSoC) + kWh_corr;
-      left_kwh = calc_kwh(0, PrevSoC) - kWh_corr;
-      Prev_kWh = Net_kWh;
-      corr_update = true;
-    } else if ((Prev_kWh > Net_kWh) && !kWh_update) {  // since the SoC has only 0.5 kWh resolution, when the Net_kWh decreases, a 0.1 kWh is substracted to the kWh calculation to interpolate until next SoC change.
-      kWh_corr -= 0.1;
-      used_kwh = calc_kwh(PrevSoC, InitSoC) + kWh_corr;
-      left_kwh = calc_kwh(0, PrevSoC) - kWh_corr;
-      Prev_kWh = Net_kWh;
-      corr_update = true;
-    }
-
-    if (sendIntervalOn) {  // add condition so "kWh_corr" is not trigger before a cycle after a "kWh_update" when wifi is not connected
-      if (kWh_update) {
+  
+      } else if ((Prev_kWh < Net_kWh) && !kWh_update) {  // since the SoC has only 0.5 kWh resolution, when the Net_kWh increases, a 0.1 kWh is added to the kWh calculation to interpolate until next SoC change.
+        kWh_corr += 0.1;
+        used_kwh = calc_kwh(PrevSoC, InitSoC) + kWh_corr;
+        left_kwh = calc_kwh(0, PrevSoC) - kWh_corr;
         Prev_kWh = Net_kWh;
-        kWh_update = false;  // reset kWh_update so correction logic starts again
+        corr_update = true;
+      } else if ((Prev_kWh > Net_kWh) && !kWh_update) {  // since the SoC has only 0.5 kWh resolution, when the Net_kWh decreases, a 0.1 kWh is substracted to the kWh calculation to interpolate until next SoC change.
+        kWh_corr -= 0.1;
+        used_kwh = calc_kwh(PrevSoC, InitSoC) + kWh_corr;
+        left_kwh = calc_kwh(0, PrevSoC) - kWh_corr;
+        Prev_kWh = Net_kWh;
+        corr_update = true;
       }
-      if (corr_update) {
-        corr_update = false;  // reset corr_update since it's not being recorded
+  
+      if (sendIntervalOn) {  // add condition so "kWh_corr" is not trigger before a cycle after a "kWh_update" when wifi is not connected
+        if (kWh_update) {
+          Prev_kWh = Net_kWh;
+          kWh_update = false;  // reset kWh_update so correction logic starts again
+        }
+        if (corr_update) {
+          corr_update = false;  // reset corr_update since it's not being recorded
+        }
+        sendIntervalOn = false;
       }
-      sendIntervalOn = false;
+  
+      if ((LastSoC + 1) < SoC && (Power > 0) && (LastSoC != 0)) {  // reset trip after a battery recharge      
+        mem_Power = Power;
+        mem_LastSoC = LastSoC;
+        mem_SoC = SoC;
+        initscan = true;
+        record_code = 1;
+        reset_trip();      
+      }
+  
+      EstFull_kWh = full_kwh * degrad_ratio;
+      EstLeft_kWh = left_kwh * degrad_ratio;
+  
+      if ((millis() - RangeCalcTimer) > RangeCalcUpdate){
+        RangeCalc();
+        RangeCalcTimer = millis();
+      }
+      
+      if (BMS_ign) {
+        EnergyTOC();
+      }
+  
+      if (Max_Pwr < 100 && (Max_Pwr < (Power + 20)) && !Power_page) {  //select the Max Power page if Power+20kW exceed Max_Pwr when Max_Pwr is lower then 100kW.
+        DrawBackground = true;
+        screenNbr = 2;
+        Power_page = true;
+      }
+      if (Power < 0 && (SpdSelect == 'P') && !Charge_page) {
+        DrawBackground = true;
+        screenNbr = 2;
+        Charge_page = true;
+      }
     }
-
-    if ((LastSoC + 1) < SoC && (Power > 0) && (LastSoC != 0)) {  // reset trip after a battery recharge      
-      mem_Power = Power;
-      mem_LastSoC = LastSoC;
-      mem_SoC = SoC;
-      initscan = true;
-      record_code = 1;
-      reset_trip();      
-    }
-
-    EstFull_kWh = full_kwh * degrad_ratio;
-    EstLeft_kWh = left_kwh * degrad_ratio;
-
-    RangeCalc();
-    if (BMS_ign) {
-      EnergyTOC();
-    }
-
-    if (Max_Pwr < 100 && (Max_Pwr < (Power + 20)) && !Power_page) {  //select the Max Power page if Power+20kW exceed Max_Pwr when Max_Pwr is lower then 100kW.
-      DrawBackground = true;
-      screenNbr = 2;
-      Power_page = true;
-    }
-    if (Power < 0 && (SpdSelect == 'P') && !Charge_page) {
-      DrawBackground = true;
-      screenNbr = 2;
-      Charge_page = true;
-    }
+  
+    save_lost(SpdSelect);
   }
-
-  save_lost(SpdSelect);
 }
 
 //--------------------------------------------------------------------------------------------
@@ -1358,12 +1373,14 @@ void makeIFTTTRequest(void * pvParameters){
 
             case 6:   // Write that esp is going timed shutdown
             headerNames = String("{\"value1\":\"") + "|||" + "Timer Shutdown" + "|||" + "Power:" + "|||" + Power + "|||" + "Timer:" + "|||" + shutdown_timer;            
-            code_received = true;            
+            code_received = true;
+            record_code = 0;            
             break;
 
             case 7:   // Write that esp is going low 12V shutdown
             headerNames = String("{\"value1\":\"") + "|||" + "Low 12V Shutdown" + "|||" + "12V Batt.:" + "|||" + AuxBattSoC + "|||" + "Timer:" + "|||" + shutdown_timer;            
-            code_received = true;            
+            code_received = true;
+            record_code = 0;            
             break;
 
         }      
@@ -1521,24 +1538,6 @@ void ResetCurrTrip() {  // when the car is turned On, current trip value are res
   }
 }
 
-/*//////Function to disable the VESS //////////*/
-
-void setVessOff(char selector) {
-  if (selector == 'D' && SelectOn) {
-    //digitalWrite(LedPin, HIGH);
-    digitalWrite(VESSoff, HIGH);
-    StartMillis = millis();
-    SelectOn = false;
-  }
-  if ((millis() - StartMillis) >= ToggleDelay) {
-    //digitalWrite(LedPin, LOW);
-    digitalWrite(VESSoff, LOW);
-  }
-  if (selector == 'P') {
-    SelectOn = true;
-  }
-}
-
 void initial_eeprom() {
 
   for (int i = 0; i < 148; i += 4) {
@@ -1592,7 +1591,7 @@ void save_lost(char selector) {
 
 void stop_esp() {
   ESP_on = false;
-  if (DriveOn && (SoC > 0)) {
+  if (DriveOn && (mem_SoC > 0)) {
     EEPROM.writeFloat(32, degrad_ratio);
     Serial.println("new_lost saved to EEPROM");
     EEPROM.writeFloat(36, PIDkWh_100);  //save actual kWh/100 in Flash memory
@@ -1624,22 +1623,24 @@ void stop_esp() {
     EEPROM.commit();
   }
   
-  tft.setTextFont(1);
-  tft.setTextSize(2);
-  tft.fillScreen(TFT_BLACK);
-  tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 16);
-  tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
-  WiFi.disconnect();
-  Serial.println("Wifi Stopped");
-  delay(1500);
-  tft.fillScreen(TFT_BLACK);
-  tft.drawString("OBD2", tft.width() / 2, tft.height() / 2 - 16);
-  tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
-  ELM_PORT.end();  
-  Serial.println("OBD2 Stopped");    
-  delay(1500);
-  Serial.println("Going to Sleep");
-  esp_deep_sleep_start();  
+  if (!sd_condition2){
+    tft.setTextSize(2);
+    tft.setFreeFont(&FreeSans9pt7b);
+    tft.fillScreen(TFT_BLACK);
+    tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 50);
+    tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
+    WiFi.disconnect();
+    Serial.println("Wifi Stopped");
+    delay(1500);
+    
+    shutdown_esp = false;
+    send_enabled = false;
+    wifiReconn = false;
+    DrawBackground = true;
+  }
+  else{
+    esp_deep_sleep_start();
+  }  
 }
 
 //--------------------------------------------------------------------------------------------
@@ -1717,9 +1718,12 @@ void button(){
       if (TouchTime >= 3 & !TouchLatch){
         TouchLatch = true;        
         Serial.println("Button3 Long Press");
-        screenNbr = 3;
-        DrawBackground = true;        
-        Btn3SetON = true;
+        if (send_enabled){
+          send_enabled = false;
+        }
+        else{
+          send_enabled = true;
+        } 
       }
       if (!Btn3SetON)
       {            
@@ -1851,17 +1855,16 @@ void DisplayPage() {
   // test for negative values and set negative flag
   for (int i = 0; i < 10; i++) {  
     if (value_float[i] < 0) {
-    value_float[i] = abs(value_float[i]);
-    negative_flag[i] = true;
+    //value_float[i] = abs(value_float[i]);
+      negative_flag[i] = true;
     }
     else {
       negative_flag[i] = false;
     }
-    dtostrf(value_float[i], 3, nbr_decimal[i], value[i]);
-  }
-  
-  // if value changes update values
-  for (int i = 0; i < 10; i++) {  
+    
+    dtostrf(value_float[i], 3, nbr_decimal[i], value[i]);    
+    
+    //if value changes update values    
     if ((value[i] != prev_value[i]) && (i < 5)) { // update left colunm
       tft.setTextColor(TFT_BLACK, TFT_BLACK);
       tft.drawString(prev_value[i], tft.width() / 4, drawLvl[i], 1);
@@ -1887,11 +1890,10 @@ void DisplayPage() {
         tft.drawString(value[i], 3 * (tft.width() / 4), drawLvl[i], 1);
       }
       strcpy(prev_value[i], value[i]);
-    }
+    }  
   }
-  
-  
 }
+
 //-------------------------------------------------------------------------------------
 //             Start of Pages content definition
 //-------------------------------------------------------------------------------------
@@ -1900,15 +1902,15 @@ void DisplayPage() {
 void page1() {
 
   strcpy(titre[0],"SoC");
-  strcpy(titre[1],"PIDkWh_100");
-  strcpy(titre[2],"kWh/100km");
-  strcpy(titre[3],"10Km_kWh");
-  strcpy(titre[4],"EstLeft_kWh");
+  strcpy(titre[1],"PID Cons");
+  strcpy(titre[2],"PWR Int Cons");
+  strcpy(titre[3],"Cons. 10Km");
+  strcpy(titre[4],"CorrLeft_kWh");
   strcpy(titre[5],"TripOdo");  
-  strcpy(titre[6],"Est_range");
-  strcpy(titre[7],"Est_range");  
-  strcpy(titre[8],"Est_range");
-  strcpy(titre[9],"used_kwh");
+  strcpy(titre[6],"Est. range");
+  strcpy(titre[7],"Est. range");  
+  strcpy(titre[8],"Est. range");
+  strcpy(titre[9],"used kwh");
   value_float[0] = SoC;  
   value_float[1] = PIDkWh_100;
   value_float[2] = kWh_100km;
@@ -1941,18 +1943,18 @@ void page1() {
 void page2() {
 
   strcpy(titre[0], "SoC");
-  strcpy(titre[1], "Calc_Left");
+  strcpy(titre[1], "kWh Left");
   strcpy(titre[2], "MAXcellv");
   strcpy(titre[3], "SOH");
-  strcpy(titre[4], "Full_Ah");
+  strcpy(titre[4], "Full Ah");
   strcpy(titre[5], "BmsSoC");
   strcpy(titre[6], "BATTv");
-  strcpy(titre[7], "CellVdiff");
-  strcpy(titre[8], "Det_Total");
-  strcpy(titre[9], "12V_SoC");
+  strcpy(titre[7], "Cell Vdiff");
+  strcpy(titre[8], "Det. Total");
+  strcpy(titre[9], "12V SoC");
   value_float[0] = SoC;
   value_float[1] = left_kwh;
-  value_float[2] = BATTv;
+  value_float[2] = MAXcellv;
   value_float[3] = SOH;
   value_float[4] = EstFull_Ah;
   value_float[5] = BmsSoC;
@@ -1982,15 +1984,15 @@ void page2() {
 void page3() {
 
   strcpy(titre[0], "Power");
-  strcpy(titre[1], "MIN_Temp");
-  strcpy(titre[2], "PID_kWh");
-  strcpy(titre[3], "Calc_Used");
+  strcpy(titre[1], "MIN Temp");
+  strcpy(titre[2], "PID kWh");
+  strcpy(titre[3], "kWh Used");
   strcpy(titre[4], "SoC");
-  strcpy(titre[5], "Max_Pwr");
-  strcpy(titre[6], "MAX_Temp");
-  strcpy(titre[7], "Int_Energ");
-  strcpy(titre[8], "Calc_Left");
-  strcpy(titre[9], "Heater");  
+  strcpy(titre[5], "Max Pwr");
+  strcpy(titre[6], "MAX Temp");
+  strcpy(titre[7], "Int. Energ");
+  strcpy(titre[8], "kWh Left");
+  strcpy(titre[9], "Chauf. Batt.");  
   value_float[0] = Power;
   value_float[1] = BattMinT;
   value_float[2] = Net_kWh;
@@ -2027,9 +2029,15 @@ void page3() {
 void loop() { 
 
   /*/////// Read each OBDII PIDs /////////////////*/     
-  read_data();
-
-  /*/////// Test touch button /////////////////*/
+  if (BMS_relay){
+    read_data();
+  }
+  else if ((millis() - read_timer) > read_data_interval){ // if BMS is not On, only scan OBD2 at some intervals
+    read_data();
+    read_timer = millis();    
+  }
+  
+  /*/////// Check if touch buttons are pressed /////////////////*/
   button();
   
   /*/////// This will trigger logic to send data to Google sheet /////////////////*/
@@ -2055,7 +2063,24 @@ void loop() {
   
   /*/////// Display Page Number /////////////////*/
 
-  if (!SetupOn && (ESP_on || (Power < 0))) {
+  if (ESP_on || BMS_relay) {
+  
+    if (display_off){      
+      ledcWrite(pwmLedChannelTFT, 128);
+      tft.writecommand(ST7789_SLPOUT);// Wakes up the display driver
+      tft.writecommand(ST7789_DISPON); // Switch on the display      
+      display_off = false;
+      if ((WiFi.status() != WL_CONNECTED) && !wifiReconn && StartWifi) {  // If esp32 is On when start the car, reconnect wifi if not connected
+        ConnectWifi(tft);
+        wifiReconn = true;
+        if (WiFi.status() == WL_CONNECTED) {
+          send_enabled = true;
+          send_data = true;
+          initscan = true;  // To write header name on Google Sheet
+        }        
+      }
+      DrawBackground = true;
+    }
 
     if (WiFi.status() == WL_CONNECTED){
         tft.fillCircle(300, 20, 6,TFT_GREEN);
@@ -2071,9 +2096,12 @@ void loop() {
       case 3: page1(); break;    
     }
   }
-  /*/////// Display Setup Page/////////////////*/
-  else {
-    page1();
+  /*/////// Turn display when BMS is off /////////////////*/
+  else {    
+    ledcWrite(pwmLedChannelTFT, 0);
+    tft.writecommand(ST7789_DISPOFF); // Switch off the display
+    tft.writecommand(ST7789_SLPIN);// Sleep the display driver
+    display_off = true;
   }
 
   /*/////// Stop ESP /////////////////*/
@@ -2087,7 +2115,8 @@ void loop() {
     if (code_sent) {
       Serial.println("Code sent and Normal shutdown");
       stop_esp();
-    } else if (!send_enabled) {
+    } 
+    else if (!send_enabled) {
       Serial.println("No Code sent and Normal shutdown");
       stop_esp();
     }
@@ -2123,18 +2152,5 @@ void loop() {
     }
   }
 
-  if ((WiFi.status() != WL_CONNECTED) && BMS_ign && !wifiReconn && StartWifi) {  // If esp32 is On when start the car, reconnect wifi if not connected    
-    tft.setFreeFont(&FreeSans9pt7b);
-    ConnectWifi(tft);
-    wifiReconn = true;
-    if (WiFi.status() == WL_CONNECTED) {
-      send_enabled = true;
-      send_data = true;
-    }
-    DrawBackground = true;
-  }
-
-  ResetCurrTrip();
-
-  //setVessOff(SpdSelect);  //This will momentarely set an output ON to turned off the VESS //
+  ResetCurrTrip();  
 }
