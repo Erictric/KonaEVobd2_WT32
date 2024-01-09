@@ -4,7 +4,7 @@
 
     SafeString by Matthew Ford: https://www.forward.com.au/pfod/ArduinoProgramming/SafeString/index.html
     Elmduino by PowerBroker2: https://github.com/PowerBroker2/ELMduino
-    https://randomnerdtutorials.com/esp32-esp8266-publish-sensor-readings-to-google-sheets/
+    https://randomnerdtutorials.com/esp32-esp8266-publish-sensor-readings-to-google-sheets/ now requires a paid membership to use the IFTTT applet
 
   notes:
   ELMduino library used is version 2.41, problem not resolved with newer version
@@ -56,9 +56,6 @@ float drawLvl[10] = {100, 170, 240, 310, 380, 100, 170, 240, 310, 380}; // and n
 #define pagenumbers 7  // number of pages to display
 #define N_km 10        //variable for the calculating kWh/100km over a N_km
 
-boolean SelectOn = true;
-unsigned long StartMillis;
-unsigned long ToggleDelay = 1000;
 boolean ResetOn = true;
 int screenNbr = 0;
 
@@ -83,7 +80,7 @@ float BattMinT;
 float BattMaxT;
 float AuxBattV;
 float AuxBattC;
-float AuxBattSoC = 80;
+float AuxBattSoC;
 float Batt12V;
 float BATTv;
 float BATTc;
@@ -232,7 +229,7 @@ float acc_dist_m20p;
 bool DriveOn = false;
 bool StayOn = false;
 bool SetupOn = false;
-bool StartWifi = true;
+bool StartWifi = false;
 bool initscan = false;
 bool InitRst = false;
 bool TrigRst = false;
@@ -250,6 +247,7 @@ bool Charge_page = false;
 bool Power_page = false;
 unsigned long read_timer;
 uint32_t read_data_interval = 2000;
+unsigned long ELM_Port_timer;
 
 // Variables for touch x,y
 static int32_t x, y;
@@ -342,18 +340,17 @@ RoundedRect btnCoff = {
 
 /*///////ESP shutdown variables///////*/
 unsigned long ESPinitTimer = 0;
-unsigned long ESPTimer = 0;
 unsigned long ESPTimerInterval = 1200;  // time in seconds to turn off ESP when it power-up during 12V battery charge cycle.
 unsigned long shutdown_timer = 0;
+unsigned long stopESP_timer = 0;
 
 /*////// Variables for Google Sheet data transfer ////////////*/
 bool send_enabled = false;
 bool send_data = false;
 bool data_sent = false;
 int nbParam = 76;  //number of parameters to send to Google Sheet
-unsigned long sendInterval = 5000;  // in millisec
-unsigned long currentTimer = 0;
-unsigned long previousTimer = 0;
+uint16_t sendInterval = 5000;  // in millisec
+unsigned long IftttTimer = 0;
 bool sendIntervalOn = false;
 
 const char* resource = "/trigger/SendData/with/key/bWQadqBNOh1P3PINCC1_Vr";  // Copy key from IFTTT applet
@@ -412,8 +409,8 @@ void setup() {
   tft.setTextColor(TFT_GREEN);
   tft.setCursor(0, 0);
   tft.setTextDatum(MC_DATUM);
-  tft.setTextSize(2);
-  tft.setFreeFont(&FreeSans9pt7b);
+  tft.setTextSize(1);
+  tft.setFreeFont(&FreeSans18pt7b);
 
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, 128);
@@ -519,6 +516,8 @@ void setup() {
   integrate_timer = millis() / 1000;
   RangeCalcTimer = millis();
   read_timer = millis();
+  IftttTimer = millis();
+  ELM_Port_timer = millis();
 
   nbr_powerOn += 1;
   EEPROM.writeFloat(40, nbr_powerOn);
@@ -597,7 +596,7 @@ int convertToInt(char* dataFrame, size_t startByte, size_t numberBytes) {
 
 void read_data() {
 
-  pid_counter++;
+  //pid_counter++;
   Serial.println(pid_counter);
 
   button();
@@ -960,11 +959,23 @@ void read_data() {
         DrawBackground = true;
         screenNbr = 2;
         Power_page = true;
+        if (Btn1SetON){
+          Btn1SetON = false;        
+        }
+        if (Btn2SetON){
+          Btn2SetON = false;       
+        }
       }
       if (Power < 0 && (SpdSelect == 'P') && !Charge_page) {
         DrawBackground = true;
         screenNbr = 2;
         Charge_page = true;
+        if (Btn1SetON){
+          Btn1SetON = false;        
+        }
+        if (Btn2SetON){
+          Btn2SetON = false;       
+        }
       }
     }
   
@@ -1505,8 +1516,7 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
 
 void ResetCurrTrip() {  // when the car is turned On, current trip value are resetted.
 
-  if (
-    ResetOn && (SoC > 1) && (Odometer > 1) && (CED > 1) && data_ready) {  // ResetOn condition might be enough, might need to update code...
+  if (ResetOn && (SoC > 1) && (Odometer > 1) && (CED > 1) && data_ready) {  // ResetOn condition might be enough, might need to update code...
     CurrInitAccEnergy = acc_energy;
     CurrInitCED = CED;
     CurrInitCEC = CEC;
@@ -1624,14 +1634,22 @@ void stop_esp() {
   }
   
   if (!sd_condition2){
-    tft.setTextSize(2);
-    tft.setFreeFont(&FreeSans9pt7b);
+    tft.setTextSize(1);
+    tft.setFreeFont(&FreeSans18pt7b);
     tft.fillScreen(TFT_BLACK);
-    tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 50);
-    tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
-    WiFi.disconnect();
-    Serial.println("Wifi Stopped");
-    delay(1500);
+    tft.setTextColor(TFT_GREEN);
+    if (WiFi.status() == WL_CONNECTED){
+      tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 50);
+      tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
+      WiFi.disconnect();
+      Serial.println("Wifi Stopped");
+    }
+    else{
+      tft.drawString("ESP", tft.width() / 2, tft.height() / 2 - 50);
+      tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
+    }
+    
+    delay(1000);
     
     shutdown_esp = false;
     send_enabled = false;
@@ -1639,6 +1657,13 @@ void stop_esp() {
     DrawBackground = true;
   }
   else{
+    tft.setTextSize(1);
+    tft.setFreeFont(&FreeSans18pt7b);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_GREEN);
+    tft.drawString("ESP", tft.width() / 2, tft.height() / 2 - 50);
+    tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);    
+    delay(1000);
     esp_deep_sleep_start();
   }  
 }
@@ -1850,6 +1875,7 @@ void DisplayPage() {
     }
     DrawBackground = false;    
   }
+  tft.setTextSize(1);
   tft.setFreeFont(&FreeSans18pt7b);
 
   // test for negative values and set negative flag
@@ -2028,23 +2054,30 @@ void page3() {
 
 void loop() { 
 
+  if(!ELM_PORT.connected() && ((millis() - ELM_Port_timer) > 2000)){
+    ConnectToOBD2(tft);
+  }
+  else{
+    ELM_Port_timer = millis();
+  }
+  
   /*/////// Read each OBDII PIDs /////////////////*/     
   if (BMS_relay){
-    read_data();
+    pid_counter++;
+    read_data();    
   }
   else if ((millis() - read_timer) > read_data_interval){ // if BMS is not On, only scan OBD2 at some intervals
     read_data();
-    read_timer = millis();    
+    read_timer = millis();        
   }
   
   /*/////// Check if touch buttons are pressed /////////////////*/
   button();
   
-  /*/////// This will trigger logic to send data to Google sheet /////////////////*/
-  currentTimer = millis();
-  if (currentTimer - previousTimer >= sendInterval) {    
+  /*/////// This will trigger logic to send data to Google sheet /////////////////*/    
+  if (millis() - IftttTimer >= sendInterval) {    
     send_data = true;  // This will trigger logic to send data to Google sheet
-    previousTimer = currentTimer;
+    IftttTimer = millis();
     if (!send_enabled) {
       sendIntervalOn = true;
     }
@@ -2053,7 +2086,7 @@ void loop() {
   //  To display a led status when values are sent to Google Sheet
   if (datasent){
     tft.fillCircle(20, 20, 6,TFT_GREEN);
-    if (currentTimer - previousTimer >= 500){
+    if (millis() - IftttTimer >= 500){  // turn led off 500mS after it was turned On
       datasent = false;
     }
   }
@@ -2063,13 +2096,14 @@ void loop() {
   
   /*/////// Display Page Number /////////////////*/
 
-  if (ESP_on || BMS_relay) {
-  
+  if ((ESP_on || BMS_relay) && SoC != 0 && !sd_condition1) {    
+    
     if (display_off){      
       ledcWrite(pwmLedChannelTFT, 128);
       tft.writecommand(ST7789_SLPOUT);// Wakes up the display driver
       tft.writecommand(ST7789_DISPON); // Switch on the display      
       display_off = false;
+      SoC_saved = false;
       if ((WiFi.status() != WL_CONNECTED) && !wifiReconn && StartWifi) {  // If esp32 is On when start the car, reconnect wifi if not connected
         ConnectWifi(tft);
         wifiReconn = true;
@@ -2082,11 +2116,13 @@ void loop() {
       DrawBackground = true;
     }
 
-    if (WiFi.status() == WL_CONNECTED){
-        tft.fillCircle(300, 20, 6,TFT_GREEN);
+    if (StartWifi) {  // If wifi is configured then display wifi status led
+      if (WiFi.status() == WL_CONNECTED){
+          tft.fillCircle(300, 20, 6,TFT_GREEN);
+        }
+      else{
+        tft.fillCircle(300, 20, 6,TFT_RED);
       }
-    else{
-      tft.fillCircle(300, 20, 6,TFT_RED);
     }
         
     switch (screenNbr) {  // select page to display
@@ -2096,23 +2132,25 @@ void loop() {
       case 3: page1(); break;    
     }
   }
-  /*/////// Turn display when BMS is off /////////////////*/
+  /*/////// Turn off display when BMS is off /////////////////*/
   else {    
     ledcWrite(pwmLedChannelTFT, 0);
     tft.writecommand(ST7789_DISPOFF); // Switch off the display
-    tft.writecommand(ST7789_SLPIN);// Sleep the display driver
+    tft.writecommand(ST7789_SLPIN); // Sleep the display driver
     display_off = true;
   }
 
   /*/////// Stop ESP /////////////////*/
-  if (!BMS_ign && ESP_on && (SpdSelect == 'P') && data_ready) {  // When car is power off, call stop_esp which saves some data before powering ESP32 down
+   
+  if (!BMS_ign && ESP_on && (SpdSelect == 'P')) {  // When car is power off, call stop_esp which saves some data before powering ESP32 down
     record_code = 5;
     shutdown_esp = true;
     if (!SoC_saved) {
       mem_SoC = SoC;
       SoC_saved = true;
+      stopESP_timer = millis();
     }
-    if (code_sent) {
+    if (code_sent || ((millis() - stopESP_timer) > (sendInterval + 2000))) {  // wait for code being sent or stop if code was not sent within 7 secondes
       Serial.println("Code sent and Normal shutdown");
       stop_esp();
     } 
@@ -2123,33 +2161,40 @@ void loop() {
 
   }
 
-  else if (!BMS_ign && (Power >= 0) && !StayOn && data_ready) {  // When the car is off but the BMS does some maintnance check, wait 20 mins before esp32 power down
+  else if (!BMS_ign && BMS_relay && data_ready && ((Power >= 0) || (AuxBattSoC < 75))) {  // When the car is off but the BMS does some maintnance check, wait 20 mins before esp32 power down
     if (!SoC_saved) {
       ESPinitTimer = millis();
       mem_SoC = SoC;
       SoC_saved = true;
+    }   
+    shutdown_timer = (millis() - ESPinitTimer) / 1000;    
+    if (shutdown_timer >= ESPTimerInterval){
+      sd_condition1 = true;
     }
-    ESPTimer = millis();
-    shutdown_timer = (ESPTimer - ESPinitTimer) / 1000;
-    sd_condition1 = shutdown_timer >= ESPTimerInterval;
     sd_condition2 = ((AuxBattSoC > 0) && (AuxBattSoC < 75));
     if (sd_condition1 || sd_condition2) {
 
       if (sd_condition1) {
         record_code = 6;
         shutdown_esp = true;
-      } else if (sd_condition2) {
+        Serial.println("Code sent and Timer shutdown");
+      } 
+      else if (sd_condition2) {
         record_code = 7;
         shutdown_esp = true;
+        Serial.println("Code sent and Low batt shutdown");
       }
-      if (code_sent) {
-        Serial.println("Code sent and Timer shutdown");
+      
+      if (code_sent) {        
         stop_esp();
-      } else if (!send_enabled) {
-        Serial.println("No Code sent and Timer shutdown");
+      } 
+      else if (!send_enabled) {               
         stop_esp();
       }
     }
+  }
+  else if (display_off && send_enabled){
+    stop_esp();
   }
 
   ResetCurrTrip();  

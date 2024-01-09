@@ -20,8 +20,9 @@ void ConnectWifi(TFT_eSPI& tft){
   wifiMulti.addAP(ssid2, password2);
     
   tft.fillScreen(TFT_BLACK);
-  tft.setTextSize(2);
-  tft.setFreeFont(&FreeSans9pt7b);
+  tft.setTextColor(TFT_GREEN);
+  tft.setTextSize(1);
+  tft.setFreeFont(&FreeSans18pt7b);
   tft.drawString("Connecting", tft.width() / 2, tft.height() / 2 - 50);
   tft.drawString("To", tft.width() / 2, tft.height() / 2);
   tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 + 50);

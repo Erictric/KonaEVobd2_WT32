@@ -17,6 +17,7 @@ void ConnectToOBD2(TFT_eSPI& tft){
   ELM_PORT.begin("ESP32", true);    
   
   tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_GREEN);
   tft.drawString("Connecting", tft.width() / 2, tft.height() / 2 - 50);
   tft.drawString("To", tft.width() / 2, tft.height() / 2);
   tft.drawString("OBDII", tft.width() / 2, tft.height() / 2 + 50);
@@ -24,12 +25,12 @@ void ConnectToOBD2(TFT_eSPI& tft){
   Serial.println("...Connecting to OBDII...");
   
   int retries = 0;
-  while (!ELM_PORT.connect("Android-Vlink") && (retries++ < 1)) // Device name of iCar Vgate pro BT4.0 OBD adapter
+  while (!ELM_PORT.connect("Android-Vlink") && (retries++ < 5)) // Device name of iCar Vgate pro BT4.0 OBD adapter
   {
     dtostrf(retries,1,0,strRetries);
     Serial.println("Couldn't connect to OBD scanner - Phase 1");
     tft.fillScreen(TFT_BLACK);
-    tft.setTextSize(2);
+    tft.setTextSize(1);
     tft.drawString("Couldn't", tft.width() / 2, tft.height() / 2 - 50);
     tft.drawString("connect to", tft.width() / 2, tft.height() / 2);
     tft.drawString("OBDII", tft.width() / 2, tft.height() / 2 + 50);
@@ -53,14 +54,14 @@ void ConnectToOBD2(TFT_eSPI& tft){
     tft.drawString(" Phase 2", tft.width() / 2, tft.height() / 2 + 150);
     delay(500);       
     
-    //esp_deep_sleep_start();
+    esp_deep_sleep_start();
   }
 
   else{
   Serial.println("Connected to OBDII");
       
   tft.fillScreen(TFT_BLACK);
-  tft.setTextSize(2);
+  tft.setTextSize(1);
   tft.drawString("Connected",  tft.width() / 2, tft.height() / 2 - 50);
   tft.drawString("to OBDII", tft.width() / 2, tft.height() / 2);
 
