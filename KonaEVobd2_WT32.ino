@@ -197,9 +197,6 @@ float old_PIDkWh_100km = 14;
 float old_kWh_100km = 14;
 float old_lost = 1;
 float EstLeft_kWh;
-float MeanSpeed;
-float Time_100km;
-float TripkWh_100km;
 float kWh_100km;
 float span_kWh_100km;
 float PIDkWh_100;
@@ -227,8 +224,6 @@ float acc_dist_m10;
 float acc_dist_m20;
 float acc_dist_m20p;
 bool DriveOn = false;
-bool StayOn = false;
-bool SetupOn = false;
 bool StartWifi = false;
 bool initscan = false;
 bool InitRst = false;
@@ -256,7 +251,7 @@ static int xMargin = 20, yMargin = 420, margin = 20, btnWidth = 80, btnHeigth = 
 char* BtnAtext = "CONS";
 char* BtnBtext = "BATT";
 char* BtnCtext = "POWER";
-char Maintitre[][13] = {"Consommation", "Batt. Info", "Energie", "Set-Up"};
+char Maintitre[][13] = {"Consommation", "Batt. Info", "Energie", "Batt. Info 2"};
 uint16_t MainTitleColor = TFT_WHITE;
 uint16_t BtnOnColor = TFT_GREEN;
 uint16_t BtnOffColor = TFT_LIGHTGREY;
@@ -1645,8 +1640,9 @@ void stop_esp() {
       Serial.println("Wifi Stopped");
     }
     else{
-      tft.drawString("ESP", tft.width() / 2, tft.height() / 2 - 50);
-      tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);
+      tft.drawString("Going", tft.width() / 2, tft.height() / 2 - 50);
+      tft.drawString("Stand", tft.width() / 2, tft.height() / 2);
+      tft.drawString("By", tft.width() / 2, tft.height() / 2 + 50);
     }
     
     delay(1000);
@@ -1743,12 +1739,10 @@ void button(){
       if (TouchTime >= 3 & !TouchLatch){
         TouchLatch = true;        
         Serial.println("Button3 Long Press");
-        if (send_enabled){
-          send_enabled = false;
-        }
-        else{
-          send_enabled = true;
-        } 
+        ledcWrite(pwmLedChannelTFT, 0);
+        tft.writecommand(ST7789_DISPOFF); // Switch off the display
+        tft.writecommand(ST7789_SLPIN); // Sleep the display driver
+        display_off = true;
       }
       if (!Btn3SetON)
       {            
@@ -1763,6 +1757,55 @@ void button(){
         if (Btn2SetON){
           Btn2SetON = false;       
         }
+      }      
+    }
+
+    //Button 4 test
+    if (x >= 0 && x <= 320 && y >= 65 && y <= 400 && (screenNbr == 1 || screenNbr == 3)) {
+      if (!TouchLatch && screenNbr == 1)
+      {            
+        screenNbr = 3;
+        Serial.println("Screen Touched");
+        TouchLatch = true;        
+        DrawBackground = true;
+      }
+      else if (!TouchLatch && screenNbr == 3)
+      {            
+        screenNbr = 1;
+        Serial.println("Screen Touched");
+        TouchLatch = true;
+        DrawBackground = true;
+      }
+    }
+
+    //Button 5 test
+    if (x >= 0 && x <= 320 && y >= 65 && y <= 400 && (screenNbr == 0 || screenNbr == 2)) {
+      if (!TouchLatch && screenNbr == 0)
+      {            
+        screenNbr = 2;
+        Serial.println("Screen Touched");
+        TouchLatch = true;        
+        DrawBackground = true;
+        Btn1SetON = false;                
+      }
+      else if (!TouchLatch && screenNbr == 2)
+      {            
+        screenNbr = 0;
+        Serial.println("Screen Touched");
+        TouchLatch = true;
+        DrawBackground = true;
+        Btn3SetON = false;
+      }
+    }
+
+    //Button 6 test
+    if (x >= 0 && x <= 320 && y >= 0 && y <= 60 && screenNbr == 2) {
+      TouchTime = (millis() - initTouchTime) / 1000;
+      if (!TouchLatch && TouchTime >= 2)
+      {            
+        Serial.println("Screen Touched");
+        TouchLatch = true;        
+        reset_trip()                
       }      
     }
   }
@@ -2047,6 +2090,46 @@ void page3() {
 }
 /*///////////////// End of Display Page 3 //////////////////////*/
 
+/*///////////////// Display Page 4 //////////////////////*/
+void page4() {
+
+  strcpy(titre[0], "COOLtemp");
+  strcpy(titre[1], "MINcellv");
+  strcpy(titre[2], "MAXcellv");
+  strcpy(titre[3], "Max_Reg");
+  strcpy(titre[4], "SoCratio");
+  strcpy(titre[5], "degrad_ratio");
+  strcpy(titre[6], "Cell nbr");
+  strcpy(titre[7], "Cell nbr");
+  strcpy(titre[8], "OUT temp");
+  strcpy(titre[9], "IN temp");
+  value_float[0] = COOLtemp;
+  value_float[1] = MINcellv;
+  value_float[2] = MAXcellv;
+  value_float[3] = Max_Reg;
+  value_float[4] = SoCratio;
+  value_float[5] = degrad_ratio;
+  value_float[6] = MINcellvNb;
+  value_float[7] = MAXcellvNb;
+  value_float[8] = OUTDOORtemp;
+  value_float[9] = INDOORtemp;
+  
+  // set number of decimals for each value to display
+  for (int i = 0; i < 10; i++) {  
+    if (value_float[i] >= 1000) {
+      nbr_decimal[i] = 0;
+    }
+    else if ((value_float[i] < 10) && (value_float[i] > -10)) {
+      nbr_decimal[i] = 2;
+    }
+    else {
+      nbr_decimal[i] = 1;
+    }
+  }
+  
+  DisplayPage();
+}
+/*///////////////// End of Display Page 4 //////////////////////*/
 
 /*///////////////////////////////////////////////////////////////////////*/
 /*                     START OF LOOP                                     */
@@ -2062,7 +2145,7 @@ void loop() {
   }
   
   /*/////// Read each OBDII PIDs /////////////////*/     
-  if (BMS_relay){
+  if (BMS_relay || ResetOn){
     pid_counter++;
     read_data();    
   }
@@ -2096,7 +2179,7 @@ void loop() {
   
   /*/////// Display Page Number /////////////////*/
 
-  if ((ESP_on || BMS_relay) && SoC != 0 && !sd_condition1) {    
+  if ((ESP_on || (BMS_relay && Power < 0)) && SoC != 0 && !sd_condition1) {    
     
     if (display_off){      
       ledcWrite(pwmLedChannelTFT, 128);
@@ -2129,7 +2212,7 @@ void loop() {
       case 0: page1(); break;
       case 1: page2(); break;
       case 2: page3(); break;
-      case 3: page1(); break;    
+      case 3: page4(); break;    
     }
   }
   /*/////// Turn off display when BMS is off /////////////////*/
@@ -2138,6 +2221,7 @@ void loop() {
     tft.writecommand(ST7789_DISPOFF); // Switch off the display
     tft.writecommand(ST7789_SLPIN); // Sleep the display driver
     display_off = true;
+    ESP_on = false;
   }
 
   /*/////// Stop ESP /////////////////*/
@@ -2150,15 +2234,14 @@ void loop() {
       SoC_saved = true;
       stopESP_timer = millis();
     }
-    if (code_sent || ((millis() - stopESP_timer) > (sendInterval + 2000))) {  // wait for code being sent or stop if code was not sent within 7 secondes
-      Serial.println("Code sent and Normal shutdown");
-      stop_esp();
-    } 
-    else if (!send_enabled) {
+    if (!send_enabled) {
       Serial.println("No Code sent and Normal shutdown");
       stop_esp();
     }
-
+    else if (code_sent || ((millis() - stopESP_timer) > (sendInterval + 2000))) {  // wait for code being sent or stop if code was not sent within 7 secondes
+      Serial.println("Code sent and Normal shutdown");
+      stop_esp();
+    }
   }
 
   else if (!BMS_ign && BMS_relay && data_ready && ((Power >= 0) || (AuxBattSoC < 75))) {  // When the car is off but the BMS does some maintnance check, wait 20 mins before esp32 power down
@@ -2185,12 +2268,12 @@ void loop() {
         Serial.println("Code sent and Low batt shutdown");
       }
       
-      if (code_sent) {        
-        stop_esp();
-      } 
-      else if (!send_enabled) {               
+      if (!send_enabled) {               
         stop_esp();
       }
+      else if (code_sent) {        
+        stop_esp();
+      }      
     }
   }
   else if (display_off && send_enabled){

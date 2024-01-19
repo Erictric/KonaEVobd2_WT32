@@ -31,11 +31,11 @@ void ConnectToOBD2(TFT_eSPI& tft){
     Serial.println("Couldn't connect to OBD scanner - Phase 1");
     tft.fillScreen(TFT_BLACK);
     tft.setTextSize(1);
-    tft.drawString("Couldn't", tft.width() / 2, tft.height() / 2 - 50);
-    tft.drawString("connect to", tft.width() / 2, tft.height() / 2);
-    tft.drawString("OBDII", tft.width() / 2, tft.height() / 2 + 50);
-    tft.drawString("scanner", tft.width() / 2, tft.height() / 2 + 100);
-    tft.drawString(" Phase 1", tft.width() / 2, tft.height() / 2 + 150); 
+    tft.drawString("Couldn't", tft.width() / 2, tft.height() / 2 - 100);
+    tft.drawString("connect to", tft.width() / 2, tft.height() / 2 - 50);
+    tft.drawString("OBDII", tft.width() / 2, tft.height() / 2);
+    tft.drawString("scanner", tft.width() / 2, tft.height() / 2 + 50);
+    tft.drawString(" Phase 1", tft.width() / 2, tft.height() / 2 + 100); 
     delay(500);    
     tft.fillScreen(TFT_BLACK);
     tft.drawString("Connecting", tft.width() / 2, tft.height() / 2 - 50);
