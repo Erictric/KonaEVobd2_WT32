@@ -25,7 +25,7 @@ void ConnectToOBD2(TFT_eSPI& tft){
   Serial.println("...Connecting to OBDII...");
   
   int retries = 0;
-  while (!ELM_PORT.connect("Android-Vlink") && (retries++ < 5)) // Device name of iCar Vgate pro BT4.0 OBD adapter
+  while (!ELM_PORT.connect("Android-Vlink") && (retries++ < 4)) // Device name of iCar Vgate pro BT4.0 OBD adapter
   {
     dtostrf(retries,1,0,strRetries);
     Serial.println("Couldn't connect to OBD scanner - Phase 1");

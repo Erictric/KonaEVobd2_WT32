@@ -24,8 +24,32 @@
 #include "WiFi.h"
 #include "Free_Fonts.h"
 #include <Adafruit_FT6206.h>
+#include "time.h"
+#include <ESP_Google_Sheet_Client.h>
+//#include <TimeLib.h>
 
 #define DEBUG_PORT Serial
+
+// Google Project ID
+#define PROJECT_ID "konaev-datalogging"
+
+// Service Account's client email
+#define CLIENT_EMAIL "konaev-datalogging@konaev-datalogging.iam.gserviceaccount.com"
+
+// Service Account's private key
+const char PRIVATE_KEY[] PROGMEM = "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCnnCHE5paKUCH3\nMvz65J3qNo+e6jsdwciuVyGU8nUps2bZ/upY0mSqHRmqrGiHA76npNWidjcEOWJ1\n0rsE75siuUdS6v0eUAnK0a4o4SsXrqUqXNK9qYxGhc/QBV2kfCDkahRGBKr3JleH\nMSTMb0kR3I7JS9TfgXQ7QfmJ1eh3iW+y3citMTNLjqGZFkeFxNt9xFgH8LFDHuUi\nUAzgmwI65qI0KkKFw7kyv2sd8WwltD3hkS+k/JBBxQTv96APmPZOXMF0f+WmvdJy\nzpMVKXG0BQBvAF73mvzUpfszuHwj1+zwqMw4GRD2ScNlBRpWgBIcj53Fj35COs7e\nz8V+V1XHAgMBAAECggEAUXMSh/REMJeLQezhuexx/tifx2ps6uN6KZqG47JFFEwt\njX8Ok7Y+G9rDV8irjPzZX+8+r9HBn4hhW/9ZSadEXMXrrpQqB9p+P7TQbOYrAjmo\n4qKz+F3VoImzOJP68w0tEMKp8nKfQDY+L6DGkJ/9wrPLIW/71Nc8S/WeFYjBDKEQ\nJDYwnW1ZRCqMIjMUxhn1q8n0EyB/Sf9vURchY3iPBdXVC8v4NdjZ1PxL42u9OzFc\nsvnIce6xCfB6hdR+hp06OylUC683Xln61tjZRXTp4QlJ5sq/LyUn0W5htQh/fcuf\ndUkqyGK4wffpTsUIp4PksDBE0HNQofNgtZ4U4rx+1QKBgQDU3MMqEZPhaG68FnQY\n/b64eY4Dzfk0WE0PSRJuxJXiw87yVPB2kkEsSU/qSN70Di262ABHTo66tVv9hNVn\nmYsxZuNZ86YvKrPVW8+RfjNej6LXomm+ffZtHAWMzDtAx7xY+lHMOW3by46iAg5S\nW0YwheDjH1u8GAIMitU/sXEa7QKBgQDJk69PPqXUtN6hj3wsPzsv+vFr9XnMMfLo\nDBA1mkQdewhPiCWLSuPQAUGMnFc8UMkbKN0D0Jkg9G0DI77NzdJwjRQ3Z/AH4Di+\n9Yj/tt0hE7HOtIZG8gOEqvbHFFwAVg7X3+huuNkW1TS/bzAAoowPKDhv9aPEgH8t\nahbzOjJ5AwKBgBH4lW2O0Fpec8LjbmfRvHFcqdW+ZQS7U74voCPD6xebCnTBIRAR\npvjzM5EHF/Oo4sl8hQGAK2Kt/xc3SMEXYH4KPrWQcX5X75jayHpzGikonUnxR1Yy\n0kRB8mIBuBrvAgLNF2zTiGffFqqs28KuPA3Kr8LdGeSWbk3axsg61d69AoGAbhjm\n0J6EDqh3TMDE7pnepvcl83RRAPFrHciw9cX7XCq9wEq5TtopkYuOFNGzZ/Mr1FS+\nWn4NlQ1LmUJlzZyUSvsTRqvTU0npVIthN2HWZ2GNZTv+dzNqLoT+Yn/BPEHEu63F\nEuyNTcZHmCOPkVk2rHSoVqZQu1v/mntua4ym0qcCgYASTSMXNL2uOXff1fiSQBP/\ngzO2p+guUWcfR5Q/pQrqGSxQzhi3ebntVnVv93jXCOq0REn0gehzgAK+M/0I9SpQ\njYeVZCLLFgG+yJaIfnXt7+GUHrzRM2otR/jSqwiRiZzhjwQnG+xdrf3ViiKIRw05\nYiVzz6jcIbYZ6k58c8NiWw==\n-----END PRIVATE KEY-----\n";
+
+// The ID of the spreadsheet where you'll publish the data
+const char spreadsheetId[] = "1Ho5H6qfHyVTo3fvcvrGUEGIylHTAWWfTAO8dBwZUqnI";
+
+bool ready = false;
+
+// Timer variables
+unsigned long lastTime = 0;  
+unsigned long timerDelay = 10000;
+
+// Token Callback function
+void tokenStatusCallback(TokenInfo info);
 
 TaskHandle_t Task1;
 
@@ -108,6 +132,7 @@ float COOLtemp;
 float OUTDOORtemp;
 float INDOORtemp;
 char SpdSelect;
+int SpdSelectNbr;
 uint32_t Odometer;
 float Speed;
 byte TransSelByte;
@@ -224,7 +249,7 @@ float acc_dist_m10;
 float acc_dist_m20;
 float acc_dist_m20p;
 bool DriveOn = false;
-bool StartWifi = false;
+bool StartWifi = true;
 bool initscan = false;
 bool InitRst = false;
 bool TrigRst = false;
@@ -348,10 +373,11 @@ uint16_t sendInterval = 5000;  // in millisec
 unsigned long IftttTimer = 0;
 bool sendIntervalOn = false;
 
-const char* resource = "/trigger/SendData/with/key/bWQadqBNOh1P3PINCC1_Vr";  // Copy key from IFTTT applet
+// NTP server to request epoch time
+const char* ntpServer = "pool.ntp.org";
 
-// Maker Webhooks IFTTT
-const char* server = "maker.ifttt.com";
+// Variable to save current epoch time
+unsigned long epochTime;
 
 /*////// Variables for OBD data timing ////////////*/
 unsigned long currentMillis;       // timing variable to sample OBD data
@@ -368,6 +394,18 @@ dataFrames results;                           // this struct will hold the resul
 
 void callback(){  //required function for touch wake
   //placeholder callback function
+}
+
+// Function that gets current epoch time
+unsigned long getTime() {
+  time_t now;
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    //Serial.println("Failed to obtain time");
+    return(0);
+  }
+  time(&now);
+  return now;
 }
 
 
@@ -425,9 +463,19 @@ void setup() {
   /* uncomment if you need to display Safestring results on Serial Monitor */
   //SafeString::setOutput(Serial);
   
-  //Increment boot number and print it every reboot
-  //++bootCount;
-  //Serial.println("Boot number: " + String(bootCount));
+  //Configure time
+  configTime(0, 0, ntpServer);
+
+  GSheet.printf("ESP Google Sheet Client v%s\n\n", ESP_GOOGLE_SHEET_CLIENT_VERSION);
+
+  // Set the callback for Google API access token generation status (for debug only)
+  GSheet.setTokenCallback(tokenStatusCallback);
+
+  // Set the seconds to refresh the auth token before expire (60 to 3540, default is 300 seconds)
+  GSheet.setPrerefreshSeconds(10 * 60);
+
+  // Begin the access token generation for Google API authentication
+  GSheet.begin(CLIENT_EMAIL, PROJECT_ID, PRIVATE_KEY);
 
   //Setup interrupt on Touch Pad 2 (GPIO2)
   touchAttachInterrupt(T2, callback, Threshold);
@@ -497,8 +545,8 @@ void setup() {
   /*//////////////Initialise Task on core0 to send data on Google Sheet ////////////////*/
 
   xTaskCreatePinnedToCore(
-    makeIFTTTRequest,   /* Function to implement the task */
-    "makeIFTTTRequest", /* Name of the task */
+    sendGoogleSheet,   /* Function to implement the task */
+    "sendGoogleSheet", /* Name of the task */
     10000,              /* Stack size in words */
     NULL,               /* Task input parameter */
     5,                  /* Priority of the task */
@@ -722,6 +770,7 @@ void read_data() {
           if (Neutral) selector[0] = 'N';
           if (Drive) selector[0] = 'D';
           SpdSelect = selector[0];
+          SpdSelectNbr = SpdSelect;
         }
         break;
   
@@ -1217,224 +1266,207 @@ float calc_kwh(float min_SoC, float max_SoC) {
   return return_kwh;
 }
 
+void tokenStatusCallback(TokenInfo info){
+    if (info.status == token_status_error){
+        GSheet.printf("Token info: type = %s, status = %s\n", GSheet.getTokenType(info).c_str(), GSheet.getTokenStatus(info).c_str());
+        GSheet.printf("Token error: %s\n", GSheet.getTokenError(info).c_str());
+    }
+    else{
+        GSheet.printf("Token info: type = %s, status = %s\n", GSheet.getTokenType(info).c_str(), GSheet.getTokenStatus(info).c_str());
+    }
+}
+
 //----------------------------------------------------------------------------------------
 //        Task on core 0 to Send data to Google Sheet via IFTTT web service Function
 //----------------------------------------------------------------------------------------
 
-void makeIFTTTRequest(void * pvParameters){
+void sendGoogleSheet(void * pvParameters){
   for(;;){
-    if (send_enabled && send_data) {
+    if (send_enabled) {
+      // Call ready() repeatedly in loop for authentication checking and processing
+      ready = GSheet.ready();
+    }
+    
+    if (send_enabled && send_data && ready) {
       code_sent = false;
-      Serial.print("Connecting to "); 
-      Serial.print(server);
       
-      WiFiClient client;
-      int retries = 5;
-      while(!!!client.connect(server, 80) && (retries-- > 0)) {
-        Serial.print(".");
-      }
-      Serial.println();
-      if(!!!client.connected()) {
-        Serial.println("Failed to connect...");
-        code_sent = true;
-      }
-      
-      Serial.print("Request resource: "); 
-      Serial.println(resource);
-      
-      float sensor_Values[nbParam];
-      
-      char column_name[ ][15]={"SoC","Power","BattMinT","Heater","Net_Ah","Net_kWh","AuxBattSoC","AuxBattV","Max_Pwr","Max_Reg","BmsSoC","MAXcellv","MINcellv","MAXcellvNb","MINcellvNb","BATTv","BATTc","Speed","Odometer","CEC","CED","CDC","CCC","SOH","BMS_ign","OPtimemins","OUTDOORtemp","INDOORtemp","SpdSelect","LastSoC","Calc_Used","Calc_Left","TripOPtime","CurrOPtime","PIDkWh_100","kWh_100km","degrad_ratio","EstLeft_kWh","span_kWh_100km","SoCratio","nbr_powerOn","TireFL_P","TireFR_P","TireRL_P","TireRR_P","TireFL_T","TireFR_T","TireRL_T","TireRR_T","acc_energy","Trip_dist","distance","BattMaxT","acc_Ah","acc_kWh_25","acc_kWh_10","acc_kWh_0","acc_kWh_m10","acc_kWh_m20","acc_kWh_m20p","acc_time_25","acc_time_10","acc_time_0","acc_time_m10","acc_time_m20","acc_time_m20p","acc_dist_25","acc_dist_10","acc_dist_0","acc_dist_m10","acc_dist_m20","acc_dist_m20p","acc_regen","MaxDetNb","MinDetNb","Deter_Min"};;
-      
-      sensor_Values[0] = SoC;
-      sensor_Values[1] = Power;
-      sensor_Values[2] = BattMinT;
-      sensor_Values[3] = Heater;
-      sensor_Values[4] = Net_Ah;
-      sensor_Values[5] = Net_kWh;
-      sensor_Values[6] = AuxBattSoC;
-      sensor_Values[7] = AuxBattV;
-      sensor_Values[8] = Max_Pwr;
-      sensor_Values[9] = Max_Reg;  
-      sensor_Values[10] = BmsSoC;
-      sensor_Values[11] = MAXcellv;
-      sensor_Values[12] = MINcellv;
-      sensor_Values[13] = MAXcellvNb;
-      sensor_Values[14] = MINcellvNb;
-      sensor_Values[15] = BATTv;
-      sensor_Values[16] = BATTc;
-      sensor_Values[17] = Speed;
-      sensor_Values[18] = Odometer;
-      sensor_Values[19] = CEC;
-      sensor_Values[20] = CED;
-      sensor_Values[21] = CDC;
-      sensor_Values[22] = CCC;
-      sensor_Values[23] = SOH;
-      sensor_Values[24] = BMS_ign;        
-      sensor_Values[25] = OPtimemins;
-      sensor_Values[26] = OUTDOORtemp;
-      sensor_Values[27] = INDOORtemp;
-      sensor_Values[28] = SpdSelect;
-      sensor_Values[29] = LastSoC;
-      sensor_Values[30] = used_kwh;
-      sensor_Values[31] = left_kwh;
-      sensor_Values[32] = TripOPtime;
-      sensor_Values[33] = CurrOPtime;      
-      sensor_Values[34] = PIDkWh_100;
-      sensor_Values[35] = kWh_100km;
-      sensor_Values[36] = degrad_ratio;
-      sensor_Values[37] = EstLeft_kWh;
-      sensor_Values[38] = span_kWh_100km;
-      sensor_Values[39] = SoCratio;
-      sensor_Values[40] = nbr_powerOn;
-      sensor_Values[41] = TireFL_P;
-      sensor_Values[42] = TireFR_P;
-      sensor_Values[43] = TireRL_P;
-      sensor_Values[44] = TireRR_P;
-      sensor_Values[45] = TireFL_T;
-      sensor_Values[46] = TireFR_T;
-      sensor_Values[47] = TireRL_T;
-      sensor_Values[48] = TireRR_T;
-      sensor_Values[49] = acc_energy;
-      sensor_Values[50] = Trip_dist;
-      sensor_Values[51] = distance; 
-      sensor_Values[52] = BattMaxT;
-      sensor_Values[53] = acc_Ah;
-      sensor_Values[54] = acc_kWh_25;
-      sensor_Values[55] = acc_kWh_10;
-      sensor_Values[56] = acc_kWh_0;
-      sensor_Values[57] = acc_kWh_m10;
-      sensor_Values[58] = acc_kWh_m20;
-      sensor_Values[59] = acc_kWh_m20p;
-      sensor_Values[60] = acc_time_25;
-      sensor_Values[61] = acc_time_10;
-      sensor_Values[62] = acc_time_0;
-      sensor_Values[63] = acc_time_m10;
-      sensor_Values[64] = acc_time_m20;
-      sensor_Values[65] = acc_time_m20p;
-      sensor_Values[66] = acc_dist_25;
-      sensor_Values[67] = acc_dist_10;
-      sensor_Values[68] = acc_dist_0;
-      sensor_Values[69] = acc_dist_m10;
-      sensor_Values[70] = acc_dist_m20;
-      sensor_Values[71] = acc_dist_m20p;
-      sensor_Values[72] = acc_regen;
-      sensor_Values[73] = MaxDetNb;
-      sensor_Values[74] = MinDetNb;
-      sensor_Values[75] = Deter_Min;
-      
-      String headerNames = "";
-      String payload ="";
-      
-      int i=0;
-      
+      FirebaseJson response;
+
+      Serial.println("\nAppend spreadsheet values...");
+      Serial.println("----------------------------");
+
+      FirebaseJson valueRange;
+
+      // Get timestamp
+      epochTime = getTime();      
+          
       if(initscan || record_code != 0 || shutdown_esp){
         switch (record_code)
         {
-            case 0:   // No reset only header required, ESP32 power reboot
-              while(i!=nbParam)
-              {
-                if(i==0){
-                  headerNames = String("{\"value1\":\"") + column_name[i];
-                  i++;
-                }
-                if(i==nbParam)
-                  break;
-                headerNames = headerNames + "|||" + column_name[i];
-                i++;    
-              }
-              initscan = false;
-              break;
+        case 0:   // No reset only header required, ESP32 power reboot
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", record_code);          
+          initscan = false;
+          break;
 
-            case 1:   // Write status for Reset after a battery was recharged
-              headerNames = String("{\"value1\":\"") + "|||" + "Battery_Recharged" + "|||" + "LastSoc:" + "|||" + mem_LastSoC + "|||" + "Soc:" + "|||" + mem_SoC + "|||" + "Power:" + "|||"  + mem_Power;
-              record_code = 0;
-              initscan = true;
-              break;
+        case 1:   // Write status for Reset after a battery was recharged
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", record_code);          
+          valueRange.set("values/[1]/[0]", mem_LastSoC);          
+          valueRange.set("values/[2]/[0]", mem_SoC);          
+          valueRange.set("values/[3]/[0]", mem_Power);              
+          record_code = 0;
+          initscan = true;
+          break;
 
-            case 2:   // Write status for Reset performed with reset button (right button)
-              headerNames = String("{\"value1\":\"") + "|||" + "Button_Reset";
-              record_code = 0;
-              initscan = true;
-              break;
+        case 2:   // Write status for Reset performed with reset button (right button)
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", record_code);                        
+          record_code = 0;
+          initscan = true;
+          break;
 
-            case 3:   // Write status for Reset when Acc_energy is less then 0.3kWh when SoC changes
-              headerNames = String("{\"value1\":\"") + "|||" + "ACC_energy <0.3" + "|||" + "acc_energy:" + "|||" + mem_energy + "|||" + "PreSoC:" + "|||" + mem_PrevSoC + "|||" + "SoC:" + "|||" + mem_SoC;
-              record_code = 0;
-              initscan = true;
-              break;
+        case 3:   // Write status for Reset when Acc_energy is less then 0.3kWh when SoC changes
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", record_code);          
+          valueRange.set("values/[1]/[0]", mem_energy);          
+          valueRange.set("values/[2]/[0]", mem_PrevSoC);          
+          valueRange.set("values/[3]/[0]", mem_SoC);              
+          record_code = 0;
+          initscan = true;
+          break;
 
-            case 4:   // Write status for Reset if SoC changes from 100 to 99% not going through 99.5%
-              headerNames = String("{\"value1\":\"") + "|||" + "100_to_99SoC_reset" + "|||" + "PreSoc:" + "|||" + mem_PrevSoC + "|||" + "SoC:" + "|||" + mem_SoC;
-              record_code = 0;
-              initscan = true;
-              break;
+        case 4:   // Write status for Reset if SoC changes from 100 to 99% not going through 99.5%
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", record_code); 
+          valueRange.set("values/[1]/[0]", mem_PrevSoC);          
+          valueRange.set("values/[2]/[0]", mem_SoC);   
+          record_code = 0;
+          initscan = true;
+          break;
 
-            case 5:   // Write that esp is going normal shutdown
-            headerNames = String("{\"value1\":\"") + "|||" + "Normal Shutdown" + "|||" + "Power:" + "|||" + Power + "|||" + "SoC:" + "|||" + mem_SoC;            
-            code_received = true;
-            record_code = 0;            
-            Serial.println("Code Received");
-            break;
+        case 5:   // Write that esp is going normal shutdown
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", record_code);          
+          valueRange.set("values/[1]/[0]", Power);          
+          valueRange.set("values/[2]/[0]", mem_SoC);                      
+          code_received = true;
+          record_code = 0;            
+          Serial.println("Code Received");
+          break;
 
-            case 6:   // Write that esp is going timed shutdown
-            headerNames = String("{\"value1\":\"") + "|||" + "Timer Shutdown" + "|||" + "Power:" + "|||" + Power + "|||" + "Timer:" + "|||" + shutdown_timer;            
-            code_received = true;
-            record_code = 0;            
-            break;
+        case 6:   // Write that esp is going timed shutdown
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", record_code);          
+          valueRange.set("values/[1]/[0]", Power);          
+          valueRange.set("values/[2]/[0]", shutdown_timer);                          
+          code_received = true;
+          record_code = 0;            
+          break;
 
-            case 7:   // Write that esp is going low 12V shutdown
-            headerNames = String("{\"value1\":\"") + "|||" + "Low 12V Shutdown" + "|||" + "12V Batt.:" + "|||" + AuxBattSoC + "|||" + "Timer:" + "|||" + shutdown_timer;            
-            code_received = true;
-            record_code = 0;            
-            break;
+        case 7:   // Write that esp is going low 12V shutdown
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", record_code);          
+          valueRange.set("values/[1]/[0]", AuxBattSoC);          
+          valueRange.set("values/[2]/[0]", shutdown_timer);                          
+          code_received = true;
+          record_code = 0;            
+          break;
 
-        }      
-          payload = headerNames;
-      }
-        
-      else{
-        while(i!=nbParam) 
-        {
-          if(i==0)
-          {
-            payload = String("{\"value1\":\"") + sensor_Values[i];
-            i++;
-          }
-          if(i==nbParam)
-          {
-             break;
-          }
-          payload = payload + "|||" + sensor_Values[i];
-          i++;    
         }
-      }      
-      
-      String jsonObject = payload + "\"}";                          
-                       
-      client.println(String("POST ") + resource + " HTTP/1.1");
-      client.println(String("Host: ") + server); 
-      client.println("Connection: close\r\nContent-Type: application/json");
-      client.print("Content-Length: ");
-      client.println(jsonObject.length());
-      client.println();
-      client.println(jsonObject);
-                  
-      int timeout = 5; // 50 * 100mS = 5 seconds            
-      while(!!!client.available() && (timeout-- > 0)){
-        delay(100);
+      }  
+      else{
+        valueRange.add("majorDimension","COLUMNS");
+        valueRange.set("values/[0]/[0]", epochTime);
+        valueRange.set("values/[1]/[0]", SoC);
+        valueRange.set("values/[2]/[0]", Power);
+        valueRange.set("values/[3]/[0]", BattMinT);
+        valueRange.set("values/[4]/[0]", Heater);
+        valueRange.set("values/[5]/[0]", Net_Ah);
+        valueRange.set("values/[6]/[0]", Net_kWh);
+        valueRange.set("values/[7]/[0]", AuxBattSoC);
+        valueRange.set("values/[8]/[0]", AuxBattV);
+        valueRange.set("values/[9]/[0]", Max_Pwr);
+        valueRange.set("values/[10]/[0]", Max_Reg);
+        valueRange.set("values/[11]/[0]", BmsSoC);
+        valueRange.set("values/[12]/[0]", MAXcellv);
+        valueRange.set("values/[13]/[0]", MINcellv);
+        valueRange.set("values/[14]/[0]", MAXcellvNb);
+        valueRange.set("values/[15]/[0]", MINcellvNb);
+        valueRange.set("values/[16]/[0]", BATTv);
+        valueRange.set("values/[17]/[0]", BATTc);
+        valueRange.set("values/[18]/[0]", Speed);
+        valueRange.set("values/[19]/[0]", Odometer);
+        valueRange.set("values/[20]/[0]", CEC);
+        valueRange.set("values/[21]/[0]", CED);
+        valueRange.set("values/[22]/[0]", CDC);
+        valueRange.set("values/[23]/[0]", CCC);
+        valueRange.set("values/[24]/[0]", SOH);
+        valueRange.set("values/[25]/[0]", BMS_ign);
+        valueRange.set("values/[26]/[0]", OPtimemins);
+        valueRange.set("values/[27]/[0]", OUTDOORtemp);
+        valueRange.set("values/[28]/[0]", INDOORtemp);
+        valueRange.set("values/[29]/[0]", SpdSelectNbr);
+        valueRange.set("values/[30]/[0]", LastSoC);
+        valueRange.set("values/[31]/[0]", used_kwh);
+        valueRange.set("values/[32]/[0]", left_kwh);
+        valueRange.set("values/[33]/[0]", TripOPtime);
+        valueRange.set("values/[34]/[0]", CurrOPtime);
+        valueRange.set("values/[35]/[0]", PIDkWh_100);
+        valueRange.set("values/[36]/[0]", kWh_100km);
+        valueRange.set("values/[37]/[0]", degrad_ratio);
+        valueRange.set("values/[38]/[0]", EstLeft_kWh);
+        valueRange.set("values/[39]/[0]", span_kWh_100km);
+        valueRange.set("values/[40]/[0]", SoCratio);
+        valueRange.set("values/[41]/[0]", nbr_powerOn);
+        valueRange.set("values/[42]/[0]", TireFL_P);
+        valueRange.set("values/[43]/[0]", TireFR_P);
+        valueRange.set("values/[44]/[0]", TireRL_P);
+        valueRange.set("values/[45]/[0]", TireRR_P);
+        valueRange.set("values/[46]/[0]", TireFL_T);
+        valueRange.set("values/[47]/[0]", TireFR_T);
+        valueRange.set("values/[48]/[0]", TireRL_T);
+        valueRange.set("values/[49]/[0]", TireRR_T);
+        valueRange.set("values/[50]/[0]", acc_energy);
+        valueRange.set("values/[51]/[0]", Trip_dist);
+        valueRange.set("values/[52]/[0]", distance);
+        valueRange.set("values/[53]/[0]", BattMaxT);
+        valueRange.set("values/[54]/[0]", acc_Ah);
+        valueRange.set("values/[55]/[0]", acc_kWh_25);
+        valueRange.set("values/[56]/[0]", acc_kWh_10);
+        valueRange.set("values/[57]/[0]", acc_kWh_0);
+        valueRange.set("values/[58]/[0]", acc_kWh_m10);
+        valueRange.set("values/[59]/[0]", acc_kWh_m20);
+        valueRange.set("values/[60]/[0]", acc_kWh_m20p);
+        valueRange.set("values/[61]/[0]", acc_time_25);
+        valueRange.set("values/[62]/[0]", acc_time_10);
+        valueRange.set("values/[63]/[0]", acc_time_0);
+        valueRange.set("values/[64]/[0]", acc_time_m10);
+        valueRange.set("values/[65]/[0]", acc_time_m20);
+        valueRange.set("values/[66]/[0]", acc_time_m20p);
+        valueRange.set("values/[67]/[0]", acc_dist_25);
+        valueRange.set("values/[68]/[0]", acc_dist_10);
+        valueRange.set("values/[69]/[0]", acc_dist_0);
+        valueRange.set("values/[70]/[0]", acc_dist_m10);
+        valueRange.set("values/[71]/[0]", acc_dist_m20);
+        valueRange.set("values/[72]/[0]", acc_time_m20p);
+        valueRange.set("values/[73]/[0]", acc_regen);
+        valueRange.set("values/[74]/[0]", MaxDetNb);
+        valueRange.set("values/[75]/[0]", MinDetNb);
+        valueRange.set("values/[76]/[0]", Deter_Min);
+      }                                   
+            
+      // Append values to the spreadsheet
+      bool success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet1!A1" /* range to append */, &valueRange /* data range to append */);
+      if (success){
+          response.toString(Serial, true);
+          valueRange.clear();
       }
-      if(!!!client.available()) {
-        Serial.println("No response...");
-        code_sent = true;
+      else{
+          Serial.println(GSheet.errorReason());
       }
-      while(client.available()){
-        Serial.write(client.read());
-      }
-      
       Serial.println();
-      Serial.println("closing connection");
-      client.stop();
+      Serial.println(ESP.getFreeHeap());
 
       datasent = true;    
       send_data = false;
@@ -1805,7 +1837,7 @@ void button(){
       {            
         Serial.println("Screen Touched");
         TouchLatch = true;        
-        reset_trip()                
+        reset_trip();                
       }      
     }
   }
@@ -2137,13 +2169,6 @@ void page4() {
 
 void loop() { 
 
-  if(!ELM_PORT.connected() && ((millis() - ELM_Port_timer) > 2000)){
-    ConnectToOBD2(tft);
-  }
-  else{
-    ELM_Port_timer = millis();
-  }
-  
   /*/////// Read each OBDII PIDs /////////////////*/     
   if (BMS_relay || ResetOn){
     pid_counter++;
@@ -2151,16 +2176,17 @@ void loop() {
   }
   else if ((millis() - read_timer) > read_data_interval){ // if BMS is not On, only scan OBD2 at some intervals
     read_data();
-    read_timer = millis();        
+    read_timer = millis();
+    pid_counter = 0;        
   }
   
   /*/////// Check if touch buttons are pressed /////////////////*/
   button();
-  
+    
   /*/////// This will trigger logic to send data to Google sheet /////////////////*/    
-  if (millis() - IftttTimer >= sendInterval) {    
-    send_data = true;  // This will trigger logic to send data to Google sheet
-    IftttTimer = millis();
+  if (millis() - lastTime > timerDelay){
+    lastTime = millis();    
+    send_data = true;  // This will trigger logic to send data to Google sheet    
     if (!send_enabled) {
       sendIntervalOn = true;
     }
@@ -2234,6 +2260,8 @@ void loop() {
       SoC_saved = true;
       stopESP_timer = millis();
     }
+    stop_esp();
+    /*
     if (!send_enabled) {
       Serial.println("No Code sent and Normal shutdown");
       stop_esp();
@@ -2242,6 +2270,7 @@ void loop() {
       Serial.println("Code sent and Normal shutdown");
       stop_esp();
     }
+    */
   }
 
   else if (!BMS_ign && BMS_relay && data_ready && ((Power >= 0) || (AuxBattSoC < 75))) {  // When the car is off but the BMS does some maintnance check, wait 20 mins before esp32 power down
@@ -2267,13 +2296,15 @@ void loop() {
         shutdown_esp = true;
         Serial.println("Code sent and Low batt shutdown");
       }
-      
+      stop_esp();
+      /*
       if (!send_enabled) {               
         stop_esp();
       }
       else if (code_sent) {        
         stop_esp();
-      }      
+      } 
+      */     
     }
   }
   else if (display_off && send_enabled){
