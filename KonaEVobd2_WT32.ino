@@ -24,9 +24,8 @@
 #include "WiFi.h"
 #include "Free_Fonts.h"
 #include <Adafruit_FT6206.h>
-#include "time.h"
 #include <ESP_Google_Sheet_Client.h>
-//#include <TimeLib.h>
+#include <TimeLib.h>
 
 #define DEBUG_PORT Serial
 
@@ -41,12 +40,6 @@ const char PRIVATE_KEY[] PROGMEM = "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgk
 
 // The ID of the spreadsheet where you'll publish the data
 const char spreadsheetId[] = "1Ho5H6qfHyVTo3fvcvrGUEGIylHTAWWfTAO8dBwZUqnI";
-
-bool ready = false;
-
-// Timer variables
-unsigned long lastTime = 0;  
-unsigned long timerDelay = 10000;
 
 // Token Callback function
 void tokenStatusCallback(TokenInfo info);
@@ -74,8 +67,8 @@ const int pwmLedChannelTFT = 0;
 //RTC_DATA_ATTR int bootCount = 0;
 
 //TFT y positions for texts and numbers
-float textLvl[10] = {65, 135, 205, 275, 345, 65, 135, 205, 275, 345};  // y coordinates for text
-float drawLvl[10] = {100, 170, 240, 310, 380, 100, 170, 240, 310, 380}; // and numbers
+uint16_t textLvl[10] = {65, 135, 205, 275, 345, 65, 135, 205, 275, 345};  // y coordinates for text
+uint16_t drawLvl[10] = {100, 170, 240, 310, 380, 100, 170, 240, 310, 380}; // and numbers
 
 #define pagenumbers 7  // number of pages to display
 #define N_km 10        //variable for the calculating kWh/100km over a N_km
@@ -132,7 +125,7 @@ float COOLtemp;
 float OUTDOORtemp;
 float INDOORtemp;
 char SpdSelect;
-int SpdSelectNbr;
+char* SpdSelected = "X";
 uint32_t Odometer;
 float Speed;
 byte TransSelByte;
@@ -368,16 +361,33 @@ unsigned long stopESP_timer = 0;
 bool send_enabled = false;
 bool send_data = false;
 bool data_sent = false;
-int nbParam = 76;  //number of parameters to send to Google Sheet
-uint16_t sendInterval = 5000;  // in millisec
-unsigned long IftttTimer = 0;
+uint16_t sendInterval = 10000;  // in millisec
+unsigned long GSheetTimer = 0;
 bool sendIntervalOn = false;
+time_t t = 0;
+bool ready = false;
+uint16_t nbrDays[13] = {0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366};
+const char* EventCode0 = "New Trip";
+const char* EventCode1 = "Recharge Reset";
+const char* EventCode2 = "Button Reset";
+const char* EventCode3 = "Reset on Acc Energy less 0.2";
+const char* EventCode4 = "Reset 100 to 99%";
+const char* EventCode5 = "Normal Shutdown";
+const char* EventCode6 = "Timer Shutdown";
+const char* EventCode7 = "Low 12V Shutdown";
+const char* Mess_SoC = "SoC:";
+const char* Mess_Power = "Power:";
+const char* Mess_LastSoC = "LastSoC:";
+const char* Mess_PrevSoC = "PrevSoC:";
+const char* Mess_Energy = "Energy:";
+const char* Mess_SD = "Shutdown Timer:";
+const char* Mess_12vSoC = "AuxBattSoC:";
 
 // NTP server to request epoch time
 const char* ntpServer = "pool.ntp.org";
 
 // Variable to save current epoch time
-unsigned long epochTime;
+char EventTime[18];
 
 /*////// Variables for OBD data timing ////////////*/
 unsigned long currentMillis;       // timing variable to sample OBD data
@@ -559,12 +569,12 @@ void setup() {
   integrate_timer = millis() / 1000;
   RangeCalcTimer = millis();
   read_timer = millis();
-  IftttTimer = millis();
-  ELM_Port_timer = millis();
+  GSheetTimer = millis();
+  ELM_Port_timer = millis();     
 
-  nbr_powerOn += 1;
-  EEPROM.writeFloat(40, nbr_powerOn);
-  EEPROM.commit();  
+  //nbr_powerOn += 1;
+  //EEPROM.writeFloat(40, nbr_powerOn);
+  //EEPROM.commit();  
 }
 
 /*////////////////////////////////////////////////////////////////////////*/
@@ -770,7 +780,7 @@ void read_data() {
           if (Neutral) selector[0] = 'N';
           if (Drive) selector[0] = 'D';
           SpdSelect = selector[0];
-          SpdSelectNbr = SpdSelect;
+          SpdSelected = &SpdSelect;
         }
         break;
   
@@ -908,7 +918,6 @@ void read_data() {
           Prev_kWh = Net_kWh;
           used_kwh = calc_kwh(SoC, InitSoC);
           left_kwh = calc_kwh(0, SoC);
-          initscan = true;
           InitRst = false;
         }
         if (!InitRst) {  // kWh calculation when the Initial reset is not active
@@ -1281,13 +1290,8 @@ void tokenStatusCallback(TokenInfo info){
 //----------------------------------------------------------------------------------------
 
 void sendGoogleSheet(void * pvParameters){
-  for(;;){
-    if (send_enabled) {
-      // Call ready() repeatedly in loop for authentication checking and processing
-      ready = GSheet.ready();
-    }
-    
-    if (send_enabled && send_data && ready) {
+  for(;;){        
+    if (send_enabled && send_data) {
       code_sent = false;
       
       FirebaseJson response;
@@ -1297,59 +1301,67 @@ void sendGoogleSheet(void * pvParameters){
 
       FirebaseJson valueRange;
 
-      // Get timestamp
-      epochTime = getTime();      
+      sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));
           
       if(initscan || record_code != 0 || shutdown_esp){
+
         switch (record_code)
         {
         case 0:   // No reset only header required, ESP32 power reboot
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", record_code);          
+          valueRange.set("values/[0]/[0]", EventCode0);          
           initscan = false;
           break;
 
         case 1:   // Write status for Reset after a battery was recharged
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", record_code);          
-          valueRange.set("values/[1]/[0]", mem_LastSoC);          
-          valueRange.set("values/[2]/[0]", mem_SoC);          
-          valueRange.set("values/[3]/[0]", mem_Power);              
+          valueRange.set("values/[0]/[0]", EventCode1);
+          valueRange.set("values/[1]/[0]", Mess_SoC);
+          valueRange.set("values/[2]/[0]", mem_SoC);
+          valueRange.set("values/[3]/[0]", Mess_LastSoC); 
+          valueRange.set("values/[4]/[0]", mem_LastSoC);             
           record_code = 0;
           initscan = true;
           break;
 
         case 2:   // Write status for Reset performed with reset button (right button)
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", record_code);                        
+          valueRange.set("values/[0]/[0]", EventCode2);                        
           record_code = 0;
           initscan = true;
           break;
-
+          
         case 3:   // Write status for Reset when Acc_energy is less then 0.3kWh when SoC changes
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", record_code);          
-          valueRange.set("values/[1]/[0]", mem_energy);          
-          valueRange.set("values/[2]/[0]", mem_PrevSoC);          
-          valueRange.set("values/[3]/[0]", mem_SoC);              
+          valueRange.set("values/[0]/[0]", EventCode3);
+          valueRange.set("values/[1]/[0]", Mess_SoC);          
+          valueRange.set("values/[2]/[0]", mem_SoC);
+          valueRange.set("values/[3]/[0]", Mess_PrevSoC);          
+          valueRange.set("values/[4]/[0]", mem_PrevSoC);
+          valueRange.set("values/[5]/[0]", Mess_Energy);
+          valueRange.set("values/[6]/[0]", mem_energy);              
           record_code = 0;
           initscan = true;
           break;
-
+              
         case 4:   // Write status for Reset if SoC changes from 100 to 99% not going through 99.5%
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", record_code); 
-          valueRange.set("values/[1]/[0]", mem_PrevSoC);          
-          valueRange.set("values/[2]/[0]", mem_SoC);   
+          valueRange.set("values/[0]/[0]", EventCode4);
+          valueRange.set("values/[1]/[0]", Mess_SoC);
+          valueRange.set("values/[2]/[0]", mem_SoC);
+          valueRange.set("values/[3]/[0]", Mess_PrevSoC); 
+          valueRange.set("values/[4]/[0]", mem_PrevSoC); 
           record_code = 0;
           initscan = true;
           break;
 
         case 5:   // Write that esp is going normal shutdown
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", record_code);          
-          valueRange.set("values/[1]/[0]", Power);          
-          valueRange.set("values/[2]/[0]", mem_SoC);                      
+          valueRange.set("values/[0]/[0]", EventCode5);
+          valueRange.set("values/[1]/[0]", Mess_SoC);
+          valueRange.set("values/[2]/[0]", mem_SoC);
+          valueRange.set("values/[3]/[0]", Mess_Power);
+          valueRange.set("values/[4]/[0]", Power);                      
           code_received = true;
           record_code = 0;            
           Serial.println("Code Received");
@@ -1357,27 +1369,30 @@ void sendGoogleSheet(void * pvParameters){
 
         case 6:   // Write that esp is going timed shutdown
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", record_code);          
-          valueRange.set("values/[1]/[0]", Power);          
-          valueRange.set("values/[2]/[0]", shutdown_timer);                          
+          valueRange.set("values/[0]/[0]", EventCode6);
+          valueRange.set("values/[1]/[0]", Mess_Power);          
+          valueRange.set("values/[2]/[0]", Power);
+          valueRange.set("values/[3]/[0]", Mess_SD);          
+          valueRange.set("values/[4]/[0]", shutdown_timer);                          
           code_received = true;
           record_code = 0;            
           break;
 
         case 7:   // Write that esp is going low 12V shutdown
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", record_code);          
-          valueRange.set("values/[1]/[0]", AuxBattSoC);          
-          valueRange.set("values/[2]/[0]", shutdown_timer);                          
+          valueRange.set("values/[0]/[0]", EventCode7);
+          valueRange.set("values/[0]/[0]", Mess_SD);
+          valueRange.set("values/[3]/[0]", shutdown_timer);
+          valueRange.set("values/[0]/[0]", Mess_12vSoC);
+          valueRange.set("values/[7]/[0]", AuxBattSoC);                          
           code_received = true;
           record_code = 0;            
           break;
-
         }
       }  
       else{
         valueRange.add("majorDimension","COLUMNS");
-        valueRange.set("values/[0]/[0]", epochTime);
+        valueRange.set("values/[0]/[0]", EventTime);
         valueRange.set("values/[1]/[0]", SoC);
         valueRange.set("values/[2]/[0]", Power);
         valueRange.set("values/[3]/[0]", BattMinT);
@@ -1406,7 +1421,7 @@ void sendGoogleSheet(void * pvParameters){
         valueRange.set("values/[26]/[0]", OPtimemins);
         valueRange.set("values/[27]/[0]", OUTDOORtemp);
         valueRange.set("values/[28]/[0]", INDOORtemp);
-        valueRange.set("values/[29]/[0]", SpdSelectNbr);
+        valueRange.set("values/[29]/[0]", SpdSelected);
         valueRange.set("values/[30]/[0]", LastSoC);
         valueRange.set("values/[31]/[0]", used_kwh);
         valueRange.set("values/[32]/[0]", left_kwh);
@@ -1484,6 +1499,7 @@ void sendGoogleSheet(void * pvParameters){
         Serial.println("Sending code sent");
         code_sent = true;
       }      
+    
     }    
     vTaskDelay(10); // some delay is required to reset watchdog timer
   }
@@ -1495,9 +1511,9 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
 
   Serial.println("saving");
   InitOdo = Odometer;
-  InitCED = CED;  //initiate to current CED for initial CED value[ and
-  InitSoC = SoC;  //initiate to current CED for initial SoC value[ and
-  InitCEC = CEC;  //initiate to current CEC for initial CEC value[ and
+  InitCED = CED;  
+  InitSoC = SoC;  
+  InitCEC = CEC;  
   InitCDC = CDC;
   InitCCC = CCC;
   Net_kWh = 0;
@@ -1520,8 +1536,8 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   EEPROM.writeFloat(12, InitSoC);  //save initial SoC to Flash memory
   EEPROM.writeFloat(16, UsedSoC);  //save initial SoC to Flash memory
   EEPROM.writeFloat(20, InitOdo);  //save initial Odometer to Flash memory
-  EEPROM.writeFloat(24, InitCDC);  //save initial Calculated CED to Flash memory
-  EEPROM.writeFloat(28, InitCCC);  //save initial Calculated CED to Flash memory
+  EEPROM.writeFloat(24, InitCDC);  //save initial CDC to Flash memory
+  EEPROM.writeFloat(28, InitCCC);  //save initial CCC to Flash memory
   EEPROM.commit();
   Serial.println("value saved to EEPROM");
   CurrInitCED = CED;
@@ -1569,7 +1585,7 @@ void ResetCurrTrip() {  // when the car is turned On, current trip value are res
       energy_array[i] = acc_energy;
     }
     degrad_ratio = old_lost;
-    if ((degrad_ratio > 1.2) || (degrad_ratio < 0.8)) {  // if a bad value[ got saved previously, initial ratio to 1
+    if ((degrad_ratio > 1.2) || (degrad_ratio < 0.7)) {  // if a bad values got saved previously, initial ratio to 1
       degrad_ratio = 1;
     }
   }
@@ -1737,13 +1753,15 @@ void button(){
       if (TouchTime >= 3 & !TouchLatch){
         TouchLatch = true;        
         Serial.println("Button2 Long Press");
-        if (!low_backlight){
-          ledcWrite(pwmLedChannelTFT, 80);
-          low_backlight = true;
+        if (!send_enabled){
+          //ledcWrite(pwmLedChannelTFT, 80);
+          send_enabled = true;
+          StartWifi = true;
         }
         else{
-          ledcWrite(pwmLedChannelTFT, 120);
-          low_backlight = false;
+          //ledcWrite(pwmLedChannelTFT, 120);
+          send_enabled = false;
+          StartWifi = false;
         }
         
         Serial.println("DONE");        
@@ -2184,18 +2202,33 @@ void loop() {
   button();
     
   /*/////// This will trigger logic to send data to Google sheet /////////////////*/    
-  if (millis() - lastTime > timerDelay){
-    lastTime = millis();    
-    send_data = true;  // This will trigger logic to send data to Google sheet    
+  if (millis() - GSheetTimer >= sendInterval){
+    GSheetTimer = millis();
+    if (send_enabled) {
+      ready = GSheet.ready();
+      
+      if (ready) {
+        // Get timestamp
+        t = getTime();
+        
+        if (((nbrDays[month(t) - 1] + day(t)) >= 70) && ((nbrDays[month(t) - 1] + day(t)) <= 308)) {  //  summer time logic
+          t = t - 14400;
+        }      
+        else{
+          t = t - 18000;
+        }                   
+        send_data = true;  // This will trigger logic to send data to Google sheet 
+      }
+    }    
     if (!send_enabled) {
       sendIntervalOn = true;
-    }
+    }       
   }
 
   //  To display a led status when values are sent to Google Sheet
   if (datasent){
     tft.fillCircle(20, 20, 6,TFT_GREEN);
-    if (millis() - IftttTimer >= 500){  // turn led off 500mS after it was turned On
+    if (millis() - GSheetTimer >= 500){  // turn led off 500mS after it was turned On
       datasent = false;
     }
   }
@@ -2260,8 +2293,7 @@ void loop() {
       SoC_saved = true;
       stopESP_timer = millis();
     }
-    stop_esp();
-    /*
+    
     if (!send_enabled) {
       Serial.println("No Code sent and Normal shutdown");
       stop_esp();
@@ -2270,7 +2302,6 @@ void loop() {
       Serial.println("Code sent and Normal shutdown");
       stop_esp();
     }
-    */
   }
 
   else if (!BMS_ign && BMS_relay && data_ready && ((Power >= 0) || (AuxBattSoC < 75))) {  // When the car is off but the BMS does some maintnance check, wait 20 mins before esp32 power down
@@ -2296,15 +2327,13 @@ void loop() {
         shutdown_esp = true;
         Serial.println("Code sent and Low batt shutdown");
       }
-      stop_esp();
-      /*
+      
       if (!send_enabled) {               
         stop_esp();
       }
-      else if (code_sent) {        
+      else if (code_sent || (shutdown_timer > (ESPTimerInterval + 2000))) {        
         stop_esp();
-      } 
-      */     
+      }     
     }
   }
   else if (display_off && send_enabled){
