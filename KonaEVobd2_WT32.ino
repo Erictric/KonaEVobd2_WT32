@@ -534,11 +534,17 @@ void setup() {
 
   //initial_eeprom(); //if a new eeprom memory is used it needs to be initialize to something first
 
-  /*/////////////////////////////////////////////////////////////////*/
-  /*                    CONNECTION TO OBDII                          */
-  /*/////////////////////////////////////////////////////////////////*/
+   /*//////////////Initialise Task on core0 to send data on Google Sheet ////////////////*/
 
-  ConnectToOBD2(tft);
+  xTaskCreatePinnedToCore(
+    sendGoogleSheet,   /* Function to implement the task */
+    "sendGoogleSheet", /* Name of the task */
+    10000,              /* Stack size in words */
+    NULL,               /* Task input parameter */
+    0,                  /* Priority of the task */
+    NULL,             /* Task handle. */
+    0);                 /* Core where the task should run */
+  delay(500);
 
   /*/////////////////////////////////////////////////////////////////*/
   /*                     CONNECTION TO WIFI                         */
@@ -550,19 +556,13 @@ void setup() {
       send_enabled = true;
     }
     initscan = true;  // To write header name on Google Sheet on power up
-  }  
+  } 
 
-  /*//////////////Initialise Task on core0 to send data on Google Sheet ////////////////*/
+  /*/////////////////////////////////////////////////////////////////*/
+  /*                    CONNECTION TO OBDII                          */
+  /*/////////////////////////////////////////////////////////////////*/
 
-  xTaskCreatePinnedToCore(
-    sendGoogleSheet,   /* Function to implement the task */
-    "sendGoogleSheet", /* Name of the task */
-    10000,              /* Stack size in words */
-    NULL,               /* Task input parameter */
-    5,                  /* Priority of the task */
-    &Task1,             /* Task handle. */
-    0);                 /* Core where the task should run */
-  delay(500);
+  ConnectToOBD2(tft);  
 
   tft.fillScreen(TFT_BLACK);
 
@@ -2208,8 +2208,11 @@ void loop() {
       ready = GSheet.ready();
       
       if (ready) {
+        Serial.println("GSheet is ready!");
         // Get timestamp
         t = getTime();
+        Serial.print("Time updated:");
+        Serial.println(t);
         
         if (((nbrDays[month(t) - 1] + day(t)) >= 70) && ((nbrDays[month(t) - 1] + day(t)) <= 308)) {  //  summer time logic
           t = t - 14400;
