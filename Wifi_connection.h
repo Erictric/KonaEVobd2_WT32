@@ -2,22 +2,35 @@
 #define WIFI_CONNECTION
 
 #include "WiFi.h"
-#include "WiFiMulti.h"
+//#include "WiFiMulti.h"
+#include <WiFiClient.h>
 #include "TFT_eSPI.h"
 
-WiFiMulti wifiMulti;
+//WiFiMulti wifiMulti;
 
-const char* ssid = "VIRGIN131";
-const char* password = "3D4F2F3311D5";
-const char* ssid2 = "SM-G950W2093";
-const char* password2 = "5311Fond";
+const char* ssid2 = "VIRGIN131";
+const char* password2 = "3D4F2F3311D5";
+const char* ssid = "WT32-SC01";
+const char* password = "5311Fond";
 
-void ConnectWifi(TFT_eSPI& tft){
-  char strRetries[2];
-  Serial.print("Connecting to Wifi "); 
+void ConnectWifi(TFT_eSPI& tft, uint16_t Wifi_select){
   
-  wifiMulti.addAP(ssid, password);
-  wifiMulti.addAP(ssid2, password2);
+  char strRetries[2];
+  Serial.println("Connecting to Wifi "); 
+
+  Serial.print("Wifi_Select=  ");
+  Serial.println(Wifi_select);
+  
+  //wifiMulti.addAP(ssid, password);
+  //wifiMulti.addAP(ssid2, password2);
+  
+  WiFi.disconnect();
+  if (Wifi_select == 0){
+    WiFi.begin(ssid, password);
+  }
+  else{
+    WiFi.begin(ssid2, password2);
+  }
     
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_GREEN);
@@ -28,14 +41,13 @@ void ConnectWifi(TFT_eSPI& tft){
   tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 + 50);
   
   int retries = 0; 
-  while (wifiMulti.run() != WL_CONNECTED  && (retries++ < 20)) { // 2 attempts 
+  while (WiFi.status() != WL_CONNECTED  && (retries++ < 5)) { // 2 attempts     
+    delay(4000);
     dtostrf(retries,1,0,strRetries);        
     Serial.print("attempts: ");Serial.println(retries);
     tft.fillScreen(TFT_BLACK);
     tft.drawString("Retry", tft.width() / 2, tft.height() / 2 - 50);
     tft.drawString(strRetries, tft.width() / 2, tft.height() / 2);    
-    vTaskDelay(1);
-    delay(500);
   }
   Serial.println("");
 

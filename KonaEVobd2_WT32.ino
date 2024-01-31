@@ -21,7 +21,7 @@
 #include "BT_communication.h"
 #include "Wifi_connection.h"
 #include "FreeRTOSConfig.h"
-#include "WiFi.h"
+//#include "WiFi.h"
 #include "Free_Fonts.h"
 #include <Adafruit_FT6206.h>
 #include <ESP_Google_Sheet_Client.h>
@@ -82,7 +82,7 @@ float mem_PrevSoC = 0;
 float mem_SoC = 0;
 float mem_Power = 0;
 float mem_LastSoC = 0;
-uint16_t nbr_powerOn = 0;
+uint16_t Wifi_select = 0;
 bool data_ready = false;
 bool code_sent = false;
 bool sd_condition1 = false;
@@ -505,7 +505,7 @@ void setup() {
   InitCCC = EEPROM.readFloat(28);
   old_lost = EEPROM.readFloat(32);
   old_PIDkWh_100km = EEPROM.readFloat(36);
-  nbr_powerOn = EEPROM.readFloat(40);
+  Wifi_select = EEPROM.readFloat(40);
   PrevOPtimemins = EEPROM.readFloat(44);
   kWh_corr = EEPROM.readFloat(48);
   acc_energy = EEPROM.readFloat(52);
@@ -551,7 +551,7 @@ void setup() {
   /*/////////////////////////////////////////////////////////////////*/
 
   if (StartWifi) {
-    ConnectWifi(tft);
+    ConnectWifi(tft, Wifi_select);
     if (WiFi.status() == WL_CONNECTED) {
       send_enabled = true;
     }
@@ -1292,197 +1292,214 @@ void tokenStatusCallback(TokenInfo info){
 void sendGoogleSheet(void * pvParameters){
   for(;;){        
     if (send_enabled && send_data) {
-      code_sent = false;
-      
-      FirebaseJson response;
-
-      Serial.println("\nAppend spreadsheet values...");
-      Serial.println("----------------------------");
-
-      FirebaseJson valueRange;
-
-      sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));
-          
-      if(initscan || record_code != 0 || shutdown_esp){
-
-        switch (record_code)
-        {
-        case 0:   // No reset only header required, ESP32 power reboot
-          valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode0);          
-          initscan = false;
-          break;
-
-        case 1:   // Write status for Reset after a battery was recharged
-          valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode1);
-          valueRange.set("values/[1]/[0]", Mess_SoC);
-          valueRange.set("values/[2]/[0]", mem_SoC);
-          valueRange.set("values/[3]/[0]", Mess_LastSoC); 
-          valueRange.set("values/[4]/[0]", mem_LastSoC);             
-          record_code = 0;
-          initscan = true;
-          break;
-
-        case 2:   // Write status for Reset performed with reset button (right button)
-          valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode2);                        
-          record_code = 0;
-          initscan = true;
-          break;
-          
-        case 3:   // Write status for Reset when Acc_energy is less then 0.3kWh when SoC changes
-          valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode3);
-          valueRange.set("values/[1]/[0]", Mess_SoC);          
-          valueRange.set("values/[2]/[0]", mem_SoC);
-          valueRange.set("values/[3]/[0]", Mess_PrevSoC);          
-          valueRange.set("values/[4]/[0]", mem_PrevSoC);
-          valueRange.set("values/[5]/[0]", Mess_Energy);
-          valueRange.set("values/[6]/[0]", mem_energy);              
-          record_code = 0;
-          initscan = true;
-          break;
-              
-        case 4:   // Write status for Reset if SoC changes from 100 to 99% not going through 99.5%
-          valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode4);
-          valueRange.set("values/[1]/[0]", Mess_SoC);
-          valueRange.set("values/[2]/[0]", mem_SoC);
-          valueRange.set("values/[3]/[0]", Mess_PrevSoC); 
-          valueRange.set("values/[4]/[0]", mem_PrevSoC); 
-          record_code = 0;
-          initscan = true;
-          break;
-
-        case 5:   // Write that esp is going normal shutdown
-          valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode5);
-          valueRange.set("values/[1]/[0]", Mess_SoC);
-          valueRange.set("values/[2]/[0]", mem_SoC);
-          valueRange.set("values/[3]/[0]", Mess_Power);
-          valueRange.set("values/[4]/[0]", Power);                      
-          code_received = true;
-          record_code = 0;            
-          Serial.println("Code Received");
-          break;
-
-        case 6:   // Write that esp is going timed shutdown
-          valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode6);
-          valueRange.set("values/[1]/[0]", Mess_Power);          
-          valueRange.set("values/[2]/[0]", Power);
-          valueRange.set("values/[3]/[0]", Mess_SD);          
-          valueRange.set("values/[4]/[0]", shutdown_timer);                          
-          code_received = true;
-          record_code = 0;            
-          break;
-
-        case 7:   // Write that esp is going low 12V shutdown
-          valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode7);
-          valueRange.set("values/[0]/[0]", Mess_SD);
-          valueRange.set("values/[3]/[0]", shutdown_timer);
-          valueRange.set("values/[0]/[0]", Mess_12vSoC);
-          valueRange.set("values/[7]/[0]", AuxBattSoC);                          
-          code_received = true;
-          record_code = 0;            
-          break;
+      ready = GSheet.ready();
+      vTaskDelay(10);     
+      if (ready) {
+        Serial.println("GSheet is ready!");
+        // Get timestamp
+        t = getTime();
+        vTaskDelay(10);
+        Serial.print("Time updated:");
+        Serial.println(t);
+        
+        if (((nbrDays[month(t) - 1] + day(t)) >= 70) && ((nbrDays[month(t) - 1] + day(t)) <= 308)) {  //  summer time logic
+          t = t - 14400;
+        }      
+        else{
+          t = t - 18000;
         }
-      }  
-      else{
-        valueRange.add("majorDimension","COLUMNS");
-        valueRange.set("values/[0]/[0]", EventTime);
-        valueRange.set("values/[1]/[0]", SoC);
-        valueRange.set("values/[2]/[0]", Power);
-        valueRange.set("values/[3]/[0]", BattMinT);
-        valueRange.set("values/[4]/[0]", Heater);
-        valueRange.set("values/[5]/[0]", Net_Ah);
-        valueRange.set("values/[6]/[0]", Net_kWh);
-        valueRange.set("values/[7]/[0]", AuxBattSoC);
-        valueRange.set("values/[8]/[0]", AuxBattV);
-        valueRange.set("values/[9]/[0]", Max_Pwr);
-        valueRange.set("values/[10]/[0]", Max_Reg);
-        valueRange.set("values/[11]/[0]", BmsSoC);
-        valueRange.set("values/[12]/[0]", MAXcellv);
-        valueRange.set("values/[13]/[0]", MINcellv);
-        valueRange.set("values/[14]/[0]", MAXcellvNb);
-        valueRange.set("values/[15]/[0]", MINcellvNb);
-        valueRange.set("values/[16]/[0]", BATTv);
-        valueRange.set("values/[17]/[0]", BATTc);
-        valueRange.set("values/[18]/[0]", Speed);
-        valueRange.set("values/[19]/[0]", Odometer);
-        valueRange.set("values/[20]/[0]", CEC);
-        valueRange.set("values/[21]/[0]", CED);
-        valueRange.set("values/[22]/[0]", CDC);
-        valueRange.set("values/[23]/[0]", CCC);
-        valueRange.set("values/[24]/[0]", SOH);
-        valueRange.set("values/[25]/[0]", BMS_ign);
-        valueRange.set("values/[26]/[0]", OPtimemins);
-        valueRange.set("values/[27]/[0]", OUTDOORtemp);
-        valueRange.set("values/[28]/[0]", INDOORtemp);
-        valueRange.set("values/[29]/[0]", SpdSelected);
-        valueRange.set("values/[30]/[0]", LastSoC);
-        valueRange.set("values/[31]/[0]", used_kwh);
-        valueRange.set("values/[32]/[0]", left_kwh);
-        valueRange.set("values/[33]/[0]", TripOPtime);
-        valueRange.set("values/[34]/[0]", CurrOPtime);
-        valueRange.set("values/[35]/[0]", PIDkWh_100);
-        valueRange.set("values/[36]/[0]", kWh_100km);
-        valueRange.set("values/[37]/[0]", degrad_ratio);
-        valueRange.set("values/[38]/[0]", EstLeft_kWh);
-        valueRange.set("values/[39]/[0]", span_kWh_100km);
-        valueRange.set("values/[40]/[0]", SoCratio);
-        valueRange.set("values/[41]/[0]", nbr_powerOn);
-        valueRange.set("values/[42]/[0]", TireFL_P);
-        valueRange.set("values/[43]/[0]", TireFR_P);
-        valueRange.set("values/[44]/[0]", TireRL_P);
-        valueRange.set("values/[45]/[0]", TireRR_P);
-        valueRange.set("values/[46]/[0]", TireFL_T);
-        valueRange.set("values/[47]/[0]", TireFR_T);
-        valueRange.set("values/[48]/[0]", TireRL_T);
-        valueRange.set("values/[49]/[0]", TireRR_T);
-        valueRange.set("values/[50]/[0]", acc_energy);
-        valueRange.set("values/[51]/[0]", Trip_dist);
-        valueRange.set("values/[52]/[0]", distance);
-        valueRange.set("values/[53]/[0]", BattMaxT);
-        valueRange.set("values/[54]/[0]", acc_Ah);
-        valueRange.set("values/[55]/[0]", acc_kWh_25);
-        valueRange.set("values/[56]/[0]", acc_kWh_10);
-        valueRange.set("values/[57]/[0]", acc_kWh_0);
-        valueRange.set("values/[58]/[0]", acc_kWh_m10);
-        valueRange.set("values/[59]/[0]", acc_kWh_m20);
-        valueRange.set("values/[60]/[0]", acc_kWh_m20p);
-        valueRange.set("values/[61]/[0]", acc_time_25);
-        valueRange.set("values/[62]/[0]", acc_time_10);
-        valueRange.set("values/[63]/[0]", acc_time_0);
-        valueRange.set("values/[64]/[0]", acc_time_m10);
-        valueRange.set("values/[65]/[0]", acc_time_m20);
-        valueRange.set("values/[66]/[0]", acc_time_m20p);
-        valueRange.set("values/[67]/[0]", acc_dist_25);
-        valueRange.set("values/[68]/[0]", acc_dist_10);
-        valueRange.set("values/[69]/[0]", acc_dist_0);
-        valueRange.set("values/[70]/[0]", acc_dist_m10);
-        valueRange.set("values/[71]/[0]", acc_dist_m20);
-        valueRange.set("values/[72]/[0]", acc_time_m20p);
-        valueRange.set("values/[73]/[0]", acc_regen);
-        valueRange.set("values/[74]/[0]", MaxDetNb);
-        valueRange.set("values/[75]/[0]", MinDetNb);
-        valueRange.set("values/[76]/[0]", Deter_Min);
-      }                                   
+        code_sent = false;
+        
+        FirebaseJson response;
+
+        Serial.println("\nAppend spreadsheet values...");
+        Serial.println("----------------------------");
+
+        FirebaseJson valueRange;
+
+        sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));
             
-      // Append values to the spreadsheet
-      bool success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet1!A1" /* range to append */, &valueRange /* data range to append */);
-      if (success){
+        if(initscan || record_code != 0 || shutdown_esp){
+
+          switch (record_code)
+          {
+          case 0:   // No reset only header required, ESP32 power reboot
+            valueRange.add("majorDimension","COLUMNS");
+            valueRange.set("values/[0]/[0]", EventCode0);          
+            initscan = false;
+            break;
+
+          case 1:   // Write status for Reset after a battery was recharged
+            valueRange.add("majorDimension","COLUMNS");
+            valueRange.set("values/[0]/[0]", EventCode1);
+            valueRange.set("values/[1]/[0]", Mess_SoC);
+            valueRange.set("values/[2]/[0]", mem_SoC);
+            valueRange.set("values/[3]/[0]", Mess_LastSoC); 
+            valueRange.set("values/[4]/[0]", mem_LastSoC);             
+            record_code = 0;
+            initscan = true;
+            break;
+
+          case 2:   // Write status for Reset performed with reset button (right button)
+            valueRange.add("majorDimension","COLUMNS");
+            valueRange.set("values/[0]/[0]", EventCode2);                        
+            record_code = 0;
+            initscan = true;
+            break;
+            
+          case 3:   // Write status for Reset when Acc_energy is less then 0.3kWh when SoC changes
+            valueRange.add("majorDimension","COLUMNS");
+            valueRange.set("values/[0]/[0]", EventCode3);
+            valueRange.set("values/[1]/[0]", Mess_SoC);          
+            valueRange.set("values/[2]/[0]", mem_SoC);
+            valueRange.set("values/[3]/[0]", Mess_PrevSoC);          
+            valueRange.set("values/[4]/[0]", mem_PrevSoC);
+            valueRange.set("values/[5]/[0]", Mess_Energy);
+            valueRange.set("values/[6]/[0]", mem_energy);              
+            record_code = 0;
+            initscan = true;
+            break;
+                
+          case 4:   // Write status for Reset if SoC changes from 100 to 99% not going through 99.5%
+            valueRange.add("majorDimension","COLUMNS");
+            valueRange.set("values/[0]/[0]", EventCode4);
+            valueRange.set("values/[1]/[0]", Mess_SoC);
+            valueRange.set("values/[2]/[0]", mem_SoC);
+            valueRange.set("values/[3]/[0]", Mess_PrevSoC); 
+            valueRange.set("values/[4]/[0]", mem_PrevSoC); 
+            record_code = 0;
+            initscan = true;
+            break;
+
+          case 5:   // Write that esp is going normal shutdown
+            valueRange.add("majorDimension","COLUMNS");
+            valueRange.set("values/[0]/[0]", EventCode5);
+            valueRange.set("values/[1]/[0]", Mess_SoC);
+            valueRange.set("values/[2]/[0]", mem_SoC);
+            valueRange.set("values/[3]/[0]", Mess_Power);
+            valueRange.set("values/[4]/[0]", Power);                      
+            code_received = true;
+            record_code = 0;            
+            Serial.println("Code Received");
+            break;
+
+          case 6:   // Write that esp is going timed shutdown
+            valueRange.add("majorDimension","COLUMNS");
+            valueRange.set("values/[0]/[0]", EventCode6);
+            valueRange.set("values/[1]/[0]", Mess_Power);          
+            valueRange.set("values/[2]/[0]", Power);
+            valueRange.set("values/[3]/[0]", Mess_SD);          
+            valueRange.set("values/[4]/[0]", shutdown_timer);                          
+            code_received = true;
+            record_code = 0;            
+            break;
+
+          case 7:   // Write that esp is going low 12V shutdown
+            valueRange.add("majorDimension","COLUMNS");
+            valueRange.set("values/[0]/[0]", EventCode7);
+            valueRange.set("values/[0]/[0]", Mess_SD);
+            valueRange.set("values/[3]/[0]", shutdown_timer);
+            valueRange.set("values/[0]/[0]", Mess_12vSoC);
+            valueRange.set("values/[7]/[0]", AuxBattSoC);                          
+            code_received = true;
+            record_code = 0;            
+            break;
+          }
+        }  
+        else{
+          valueRange.add("majorDimension","COLUMNS");
+          valueRange.set("values/[0]/[0]", EventTime);
+          valueRange.set("values/[1]/[0]", SoC);
+          valueRange.set("values/[2]/[0]", Power);
+          valueRange.set("values/[3]/[0]", BattMinT);
+          valueRange.set("values/[4]/[0]", Heater);
+          valueRange.set("values/[5]/[0]", Net_Ah);
+          valueRange.set("values/[6]/[0]", Net_kWh);
+          valueRange.set("values/[7]/[0]", AuxBattSoC);
+          valueRange.set("values/[8]/[0]", AuxBattV);
+          valueRange.set("values/[9]/[0]", Max_Pwr);
+          valueRange.set("values/[10]/[0]", Max_Reg);
+          valueRange.set("values/[11]/[0]", BmsSoC);
+          valueRange.set("values/[12]/[0]", MAXcellv);
+          valueRange.set("values/[13]/[0]", MINcellv);
+          valueRange.set("values/[14]/[0]", MAXcellvNb);
+          valueRange.set("values/[15]/[0]", MINcellvNb);
+          valueRange.set("values/[16]/[0]", BATTv);
+          valueRange.set("values/[17]/[0]", BATTc);
+          valueRange.set("values/[18]/[0]", Speed);
+          valueRange.set("values/[19]/[0]", Odometer);
+          valueRange.set("values/[20]/[0]", CEC);
+          valueRange.set("values/[21]/[0]", CED);
+          valueRange.set("values/[22]/[0]", CDC);
+          valueRange.set("values/[23]/[0]", CCC);
+          valueRange.set("values/[24]/[0]", SOH);
+          valueRange.set("values/[25]/[0]", BMS_ign);
+          valueRange.set("values/[26]/[0]", OPtimemins);
+          valueRange.set("values/[27]/[0]", OUTDOORtemp);
+          valueRange.set("values/[28]/[0]", INDOORtemp);
+          valueRange.set("values/[29]/[0]", SpdSelected);
+          valueRange.set("values/[30]/[0]", LastSoC);
+          valueRange.set("values/[31]/[0]", used_kwh);
+          valueRange.set("values/[32]/[0]", left_kwh);
+          valueRange.set("values/[33]/[0]", TripOPtime);
+          valueRange.set("values/[34]/[0]", CurrOPtime);
+          valueRange.set("values/[35]/[0]", PIDkWh_100);
+          valueRange.set("values/[36]/[0]", kWh_100km);
+          valueRange.set("values/[37]/[0]", degrad_ratio);
+          valueRange.set("values/[38]/[0]", EstLeft_kWh);
+          valueRange.set("values/[39]/[0]", span_kWh_100km);
+          valueRange.set("values/[40]/[0]", SoCratio);
+          valueRange.set("values/[41]/[0]", Wifi_select);
+          valueRange.set("values/[42]/[0]", TireFL_P);
+          valueRange.set("values/[43]/[0]", TireFR_P);
+          valueRange.set("values/[44]/[0]", TireRL_P);
+          valueRange.set("values/[45]/[0]", TireRR_P);
+          valueRange.set("values/[46]/[0]", TireFL_T);
+          valueRange.set("values/[47]/[0]", TireFR_T);
+          valueRange.set("values/[48]/[0]", TireRL_T);
+          valueRange.set("values/[49]/[0]", TireRR_T);
+          valueRange.set("values/[50]/[0]", acc_energy);
+          valueRange.set("values/[51]/[0]", Trip_dist);
+          valueRange.set("values/[52]/[0]", distance);
+          valueRange.set("values/[53]/[0]", BattMaxT);
+          valueRange.set("values/[54]/[0]", acc_Ah);
+          valueRange.set("values/[55]/[0]", acc_kWh_25);
+          valueRange.set("values/[56]/[0]", acc_kWh_10);
+          valueRange.set("values/[57]/[0]", acc_kWh_0);
+          valueRange.set("values/[58]/[0]", acc_kWh_m10);
+          valueRange.set("values/[59]/[0]", acc_kWh_m20);
+          valueRange.set("values/[60]/[0]", acc_kWh_m20p);
+          valueRange.set("values/[61]/[0]", acc_time_25);
+          valueRange.set("values/[62]/[0]", acc_time_10);
+          valueRange.set("values/[63]/[0]", acc_time_0);
+          valueRange.set("values/[64]/[0]", acc_time_m10);
+          valueRange.set("values/[65]/[0]", acc_time_m20);
+          valueRange.set("values/[66]/[0]", acc_time_m20p);
+          valueRange.set("values/[67]/[0]", acc_dist_25);
+          valueRange.set("values/[68]/[0]", acc_dist_10);
+          valueRange.set("values/[69]/[0]", acc_dist_0);
+          valueRange.set("values/[70]/[0]", acc_dist_m10);
+          valueRange.set("values/[71]/[0]", acc_dist_m20);
+          valueRange.set("values/[72]/[0]", acc_time_m20p);
+          valueRange.set("values/[73]/[0]", acc_regen);
+          valueRange.set("values/[74]/[0]", MaxDetNb);
+          valueRange.set("values/[75]/[0]", MinDetNb);
+          valueRange.set("values/[76]/[0]", Deter_Min);
+        }                                   
+              
+        // Append values to the spreadsheet
+        bool success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet1!A1" /* range to append */, &valueRange /* data range to append */);
+        vTaskDelay(10);
+        if (success){
           response.toString(Serial, true);
           valueRange.clear();
-      }
-      else{
+        }
+        else{        
           Serial.println(GSheet.errorReason());
+        }
+        Serial.println();
+        Serial.println(ESP.getFreeHeap());
       }
-      Serial.println();
-      Serial.println(ESP.getFreeHeap());
-
       datasent = true;    
       send_data = false;
       pwr_changed = 0;
@@ -1498,8 +1515,8 @@ void sendGoogleSheet(void * pvParameters){
       if (code_received){
         Serial.println("Sending code sent");
         code_sent = true;
-      }      
-    
+      }     
+      
     }    
     vTaskDelay(10); // some delay is required to reset watchdog timer
   }
@@ -1613,6 +1630,7 @@ void save_lost(char selector) {
     EEPROM.writeFloat(32, degrad_ratio);
     Serial.println("new_lost saved to EEPROM");
     EEPROM.writeFloat(36, PIDkWh_100);  //save actual kWh/100 in Flash memory
+    EEPROM.writeFloat(40, Wifi_select);
     EEPROM.writeFloat(44, TripOPtime);  //save initial trip time to Flash memory
     EEPROM.writeFloat(48, kWh_corr);    //save cummulative kWh correction (between 2 SoC values) to Flash memory
     EEPROM.writeFloat(52, acc_energy);
@@ -1648,6 +1666,7 @@ void stop_esp() {
     EEPROM.writeFloat(32, degrad_ratio);
     Serial.println("new_lost saved to EEPROM");
     EEPROM.writeFloat(36, PIDkWh_100);  //save actual kWh/100 in Flash memory
+    EEPROM.writeFloat(40, Wifi_select);
     EEPROM.writeFloat(44, TripOPtime);  //save initial trip time to Flash memory
     EEPROM.writeFloat(48, kWh_corr);    //save cummulative kWh correction (between 2 SoC values) to Flash memory
     EEPROM.writeFloat(52, acc_energy);
@@ -1753,15 +1772,13 @@ void button(){
       if (TouchTime >= 3 & !TouchLatch){
         TouchLatch = true;        
         Serial.println("Button2 Long Press");
-        if (!send_enabled){
+        if (Wifi_select == 0){
           //ledcWrite(pwmLedChannelTFT, 80);
-          send_enabled = true;
-          StartWifi = true;
+          Wifi_select == 1;
         }
         else{
           //ledcWrite(pwmLedChannelTFT, 120);
-          send_enabled = false;
-          StartWifi = false;
+          Wifi_select == 0;
         }
         
         Serial.println("DONE");        
@@ -2204,26 +2221,10 @@ void loop() {
   /*/////// This will trigger logic to send data to Google sheet /////////////////*/    
   if (millis() - GSheetTimer >= sendInterval){
     GSheetTimer = millis();
-    if (send_enabled) {
-      ready = GSheet.ready();
-      
-      if (ready) {
-        Serial.println("GSheet is ready!");
-        // Get timestamp
-        t = getTime();
-        Serial.print("Time updated:");
-        Serial.println(t);
-        
-        if (((nbrDays[month(t) - 1] + day(t)) >= 70) && ((nbrDays[month(t) - 1] + day(t)) <= 308)) {  //  summer time logic
-          t = t - 14400;
-        }      
-        else{
-          t = t - 18000;
-        }                   
-        send_data = true;  // This will trigger logic to send data to Google sheet 
-      }
+    if (send_enabled) {                         
+        send_data = true;  // This will trigger logic to send data to Google sheet       
     }    
-    if (!send_enabled) {
+    else {
       sendIntervalOn = true;
     }       
   }
@@ -2250,7 +2251,7 @@ void loop() {
       display_off = false;
       SoC_saved = false;
       if ((WiFi.status() != WL_CONNECTED) && !wifiReconn && StartWifi) {  // If esp32 is On when start the car, reconnect wifi if not connected
-        ConnectWifi(tft);
+        ConnectWifi(tft, Wifi_select);
         wifiReconn = true;
         if (WiFi.status() == WL_CONNECTED) {
           send_enabled = true;
