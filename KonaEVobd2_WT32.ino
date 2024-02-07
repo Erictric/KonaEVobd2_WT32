@@ -26,6 +26,8 @@
 #include <ESP_Google_Sheet_Client.h>
 #include <TimeLib.h>
 
+#define FIREBASE_USE_PSRAM
+
 #define DEBUG_PORT Serial
 
 // Google Project ID
@@ -64,7 +66,7 @@ const char PRIVATE_KEY[] PROGMEM = "-----BEGIN PRIVATE KEY-----\n"
                                    "YiVzz6jcIbYZ6k58c8NiWw==\n"
                                    "-----END PRIVATE KEY-----\n";
 
-// The ID of the spreadsheet where you'll publish the data
+// The ID of the spreadsheet where the data is published
 const char spreadsheetId[] = "1Ho5H6qfHyVTo3fvcvrGUEGIylHTAWWfTAO8dBwZUqnI";
 
 // Token Callback function
@@ -387,12 +389,13 @@ unsigned long stopESP_timer = 0;
 bool send_enabled = false;
 bool send_data = false;
 bool data_sent = false;
+bool ready = false;   // Google Sheet ready flag
 uint16_t sendInterval = 10000;  // in millisec
 unsigned long GSheetTimer = 0;
 bool sendIntervalOn = false;
-time_t t = 0;
-bool ready = false;
-uint16_t nbrDays[13] = {0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366};
+time_t t = 0;   // Variable to save current epoch time
+uint16_t nbrDays[13] = {0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366};  // Array for summer time logics
+char EventTime[18];   // Array to send formatted time
 const char* EventCode0 = "New Trip";
 const char* EventCode1 = "Recharge Reset";
 const char* EventCode2 = "Button Reset";
@@ -411,9 +414,6 @@ const char* Mess_12vSoC = "AuxBattSoC:";
 
 // NTP server to request epoch time
 const char* ntpServer = "pool.ntp.org";
-
-// Variable to save current epoch time
-char EventTime[18];
 
 /*////// Variables for OBD data timing ////////////*/
 uint8_t pid_counter = 0;
@@ -461,6 +461,18 @@ void setup() {
 
   Serial.println("Serial Monitor - STARTED");
 
+  if(psramInit()){
+    Serial.println("\nThe PSRAM is correctly initialized");
+  }
+  else{
+    Serial.println("\nPSRAM does not work");
+  }
+
+  log_d("Total heap: %d", ESP.getHeapSize());
+  log_d("Free heap: %d", ESP.getFreeHeap());
+  log_d("Total PSRAM: %d", ESP.getPsramSize());
+  log_d("Free PSRAM: %d", ESP.getFreePsram());
+  
   /*//////////////Initialise Touch screen ////////////////*/
   // Pins 18/19 are SDA/SCL for touch sensor on this device
   // 40 is a touch threshold
@@ -479,8 +491,8 @@ void setup() {
   tft.setTextSize(1);
   tft.setFreeFont(&FreeSans18pt7b);
 
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, 128);
+  //pinMode(TFT_BL, OUTPUT);
+  //digitalWrite(TFT_BL, 128);
 
   Serial.print("Configuring PWM for TFT backlight... ");
   ledcSetup(pwmLedChannelTFT, pwmFreq, pwmResolution);
@@ -496,7 +508,25 @@ void setup() {
 
   /* uncomment if you need to display Safestring results on Serial Monitor */
   //SafeString::setOutput(Serial);
+
+  /*/////////////////////////////////////////////////////////////////*/
+  /*                    CONNECTION TO OBDII                          */
+  /*/////////////////////////////////////////////////////////////////*/
+
+  ConnectToOBD2(tft);
   
+   /*/////////////////////////////////////////////////////////////////*/
+  /*                     CONNECTION TO WIFI                         */
+  /*/////////////////////////////////////////////////////////////////*/
+
+  if (StartWifi) {
+    ConnectWifi(tft, Wifi_select);
+    if (WiFi.status() == WL_CONNECTED) {
+      send_enabled = true;
+    }
+    initscan = true;  // To write header name on Google Sheet on power up
+  }   
+
   //Configure time
   configTime(0, 0, ntpServer);
 
@@ -568,25 +598,7 @@ void setup() {
     0,                  /* Priority of the task */
     NULL,             /* Task handle. */
     0);                 /* Core where the task should run */
-  delay(500);
-
-  /*/////////////////////////////////////////////////////////////////*/
-  /*                     CONNECTION TO WIFI                         */
-  /*/////////////////////////////////////////////////////////////////*/
-
-  if (StartWifi) {
-    ConnectWifi(tft, Wifi_select);
-    if (WiFi.status() == WL_CONNECTED) {
-      send_enabled = true;
-    }
-    initscan = true;  // To write header name on Google Sheet on power up
-  } 
-
-  /*/////////////////////////////////////////////////////////////////*/
-  /*                    CONNECTION TO OBDII                          */
-  /*/////////////////////////////////////////////////////////////////*/
-
-  ConnectToOBD2(tft);  
+  delay(500);   
 
   tft.fillScreen(TFT_BLACK);
 
@@ -1317,7 +1329,7 @@ void sendGoogleSheet(void * pvParameters){
       // Get timestamp
       t = getTime();
       vTaskDelay(10);
-      Serial.print("Time updated:");
+      Serial.print("Time updated: ");
       Serial.println(t);
       
       if (((nbrDays[month(t) - 1] + day(t)) >= 70) && ((nbrDays[month(t) - 1] + day(t)) <= 308)) {  //  summer time logic
@@ -1517,12 +1529,14 @@ void sendGoogleSheet(void * pvParameters){
         datasent = true;
       }
       else{        
+        Serial.print("GSheet sent error: ");
         Serial.println(GSheet.errorReason());
         valueRange.clear();
         failsent = true;
         nbr_fails += 1;
       }
       Serial.println();
+      Serial.print("FreeHeap: ");
       Serial.println(ESP.getFreeHeap());
             
       if(kWh_update){ //add condition so "kWh_corr" is not trigger before a cycle after a "kWh_update"
