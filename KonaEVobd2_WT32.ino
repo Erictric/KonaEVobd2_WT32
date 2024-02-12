@@ -519,7 +519,7 @@ void setup() {
   /*                     CONNECTION TO WIFI                         */
   /*/////////////////////////////////////////////////////////////////*/
 
-  if (StartWifi) {
+  if (StartWifi && OBD2connected) {
     ConnectWifi(tft, Wifi_select);
     if (WiFi.status() == WL_CONNECTED) {
       send_enabled = true;
@@ -542,10 +542,10 @@ void setup() {
   GSheet.begin(CLIENT_EMAIL, PROJECT_ID, PRIVATE_KEY);
 
   //Setup interrupt on Touch Pad 2 (GPIO2)
-  touchAttachInterrupt(T2, callback, Threshold);
+  //touchAttachInterrupt(T2, callback, Threshold);
 
   //Configure Touchpad as wakeup source
-  esp_sleep_enable_touchpad_wakeup(); // initialize ESP wakeup on Touch activation  
+  //esp_sleep_enable_touchpad_wakeup(); // initialize ESP wakeup on Touch activation  
 
   /*////// Get the stored value from last re-initialisation /////*/
 
@@ -1770,7 +1770,13 @@ void stop_esp() {
 //--------------------------------------------------------------------------------------------
 
 void button(){
-  if (ts.touched()) {
+  if (ts.touched() && !OBD2connected) {
+    ledcWrite(pwmLedChannelTFT, 128);
+    tft.writecommand(ST7789_SLPOUT);// Wakes up the display driver
+    tft.writecommand(ST7789_DISPON); // Switch on the display
+    ConnectToOBD2(tft);
+  }
+  else if (ts.touched()) {
     p = ts.getPoint();
     x = p.x;
     y = p.y;
@@ -2239,11 +2245,11 @@ void page4() {
 void loop() { 
 
   /*/////// Read each OBDII PIDs /////////////////*/     
-  if (BMS_relay || ResetOn){
+  if ((BMS_relay || ResetOn) && OBD2connected){
     pid_counter++;
     read_data();    
   }
-  else if ((millis() - read_timer) > read_data_interval){ // if BMS is not On, only scan OBD2 at some intervals
+  else if (((millis() - read_timer) > read_data_interval) && OBD2connected){ // if BMS is not On, only scan OBD2 at some intervals
     read_data();
     read_timer = millis();
     pid_counter = 0;        
@@ -2253,6 +2259,7 @@ void loop() {
   button();
     
   /*/////// This will trigger logic to send data to Google sheet /////////////////*/    
+  
   ready = GSheet.ready();
   if (millis() - GSheetTimer >= sendInterval){
     GSheetTimer = millis();
