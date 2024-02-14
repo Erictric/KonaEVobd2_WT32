@@ -213,6 +213,8 @@ float LastSoC = 0;
 float integrate_timer = 0.0;
 float start_kwh;
 float acc_energy = 0.0;
+float prev_energy = 0.0;
+float delta_energy = 0.0;
 float acc_regen;
 float acc_Ah = 0.0;
 float last_energy = 0.0;
@@ -388,8 +390,10 @@ unsigned long stopESP_timer = 0;
 /*////// Variables for Google Sheet data transfer ////////////*/
 bool send_enabled = false;
 bool send_data = false;
+bool send_data2 = false;
 bool data_sent = false;
 bool ready = false;   // Google Sheet ready flag
+bool success = false;
 uint16_t sendInterval = 10000;  // in millisec
 unsigned long GSheetTimer = 0;
 bool sendIntervalOn = false;
@@ -439,6 +443,13 @@ unsigned long getTime() {
     return(0);
   }
   time(&now);
+
+  if (((nbrDays[month(now) - 1] + day(now)) >= 70) && ((nbrDays[month(now) - 1] + day(now)) <= 308)) {  //  summer time logic
+        now = now - 14400;
+      }      
+      else{
+        now = now - 18000;
+      }
   return now;
 }
 
@@ -906,8 +917,7 @@ void read_data() {
 
   Power = (BATTv * BATTc) * 0.001;
   Integrat_power();
-  Integrat_current();
-  integrate_timer = millis();
+  Integrat_current();  
 
     if (!ResetOn) {  // On power On, wait for current trip value to be re-initialized before executing the next lines of code
       TripOdo = Odometer - InitOdo;
@@ -981,6 +991,19 @@ void read_data() {
             PrevSoC = SoC;
             Prev_kWh = Net_kWh;
             kWh_update = true;
+            Integrat_power();
+            delta_energy = acc_energy - prev_energy;
+            prev_energy = acc_energy;
+            if (send_enabled) {
+              // Get timestamp
+              t = getTime();
+              Serial.print("Time updated: ");
+              Serial.println(t);
+              
+              sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));                         
+              
+              send_data2 = true;  // This will trigger logic to send data to Google sheet       
+            }
   
             if ((used_kwh >= 2) && (SpdSelect == 'D')) {  // Wait till 2 kWh has been used to start calculating ratio to have a better accuracy
               degrad_ratio = Net_kWh / used_kwh;
@@ -1116,6 +1139,7 @@ void Integrat_power() {
   float pwr_interval;
   float int_pwr;
   pwr_interval = (millis() - integrate_timer) / 1000;
+  integrate_timer = millis();
   int_pwr = Power * pwr_interval / 3600;
   acc_energy += int_pwr;
   if (int_pwr < 0) {
@@ -1323,21 +1347,8 @@ void tokenStatusCallback(TokenInfo info){
 
 void sendGoogleSheet(void * pvParameters){
   for(;;){        
-    if (send_enabled && (send_data || record_code != 0)) {
-      send_data = false;
-
-      // Get timestamp
-      t = getTime();
-      vTaskDelay(10);
-      Serial.print("Time updated: ");
-      Serial.println(t);
-      
-      if (((nbrDays[month(t) - 1] + day(t)) >= 70) && ((nbrDays[month(t) - 1] + day(t)) <= 308)) {  //  summer time logic
-        t = t - 14400;
-      }      
-      else{
-        t = t - 18000;
-      }
+    if (send_enabled && (send_data || record_code != 0 || send_data2)) {
+            
       code_sent = false;
       
       FirebaseJson response;
@@ -1345,9 +1356,7 @@ void sendGoogleSheet(void * pvParameters){
       Serial.println("\nAppend spreadsheet values...");
       Serial.println("----------------------------");
 
-      FirebaseJson valueRange;
-
-      sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));
+      FirebaseJson valueRange;      
           
       if(initscan || record_code != 0 || shutdown_esp){
 
@@ -1365,15 +1374,13 @@ void sendGoogleSheet(void * pvParameters){
           valueRange.set("values/[1]/[0]", Mess_SoC);
           valueRange.set("values/[2]/[0]", mem_SoC);
           valueRange.set("values/[3]/[0]", Mess_LastSoC); 
-          valueRange.set("values/[4]/[0]", mem_LastSoC);             
-          record_code = 0;
+          valueRange.set("values/[4]/[0]", mem_LastSoC);
           initscan = true;
           break;
 
         case 2:   // Write status for Reset performed with reset button (right button)
           valueRange.add("majorDimension","COLUMNS");
-          valueRange.set("values/[0]/[0]", EventCode2);                        
-          record_code = 0;
+          valueRange.set("values/[0]/[0]", EventCode2);
           initscan = true;
           break;
           
@@ -1385,8 +1392,7 @@ void sendGoogleSheet(void * pvParameters){
           valueRange.set("values/[3]/[0]", Mess_PrevSoC);          
           valueRange.set("values/[4]/[0]", mem_PrevSoC);
           valueRange.set("values/[5]/[0]", Mess_Energy);
-          valueRange.set("values/[6]/[0]", mem_energy);              
-          record_code = 0;
+          valueRange.set("values/[6]/[0]", mem_energy);
           initscan = true;
           break;
               
@@ -1396,8 +1402,7 @@ void sendGoogleSheet(void * pvParameters){
           valueRange.set("values/[1]/[0]", Mess_SoC);
           valueRange.set("values/[2]/[0]", mem_SoC);
           valueRange.set("values/[3]/[0]", Mess_PrevSoC); 
-          valueRange.set("values/[4]/[0]", mem_PrevSoC); 
-          record_code = 0;
+          valueRange.set("values/[4]/[0]", mem_PrevSoC);           
           initscan = true;
           break;
 
@@ -1410,8 +1415,7 @@ void sendGoogleSheet(void * pvParameters){
           valueRange.set("values/[4]/[0]", Power);
           valueRange.set("values/[5]/[0]", SpdSelected);
           valueRange.set("values/[6]/[0]", nbr_fails);                      
-          code_received = true;
-          record_code = 0;            
+          code_received = true;                      
           Serial.println("Code Received");
           break;
 
@@ -1422,8 +1426,7 @@ void sendGoogleSheet(void * pvParameters){
           valueRange.set("values/[2]/[0]", Power);
           valueRange.set("values/[3]/[0]", Mess_SD);          
           valueRange.set("values/[4]/[0]", shutdown_timer);                          
-          code_received = true;
-          record_code = 0;            
+          code_received = true;                      
           break;
 
         case 7:   // Write that esp is going low 12V shutdown
@@ -1433,8 +1436,7 @@ void sendGoogleSheet(void * pvParameters){
           valueRange.set("values/[3]/[0]", shutdown_timer);
           valueRange.set("values/[0]/[0]", Mess_12vSoC);
           valueRange.set("values/[7]/[0]", AuxBattSoC);                          
-          code_received = true;
-          record_code = 0;            
+          code_received = true;                      
           break;
         }
       }  
@@ -1518,10 +1520,19 @@ void sendGoogleSheet(void * pvParameters){
         valueRange.set("values/[75]/[0]", MinDetNb);
         valueRange.set("values/[76]/[0]", Deter_Min);
         valueRange.set("values/[77]/[0]", nbr_fails);
+        valueRange.set("values/[78]/[0]", delta_energy);
       }                                   
             
       // Append values to the spreadsheet
-      bool success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet1!A1" /* range to append */, &valueRange /* data range to append */);
+      if (send_data || record_code != 0){
+        success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet1!A1" /* range to append */, &valueRange /* data range to append */);
+      }
+      if (send_data2){
+        success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet2!A1" /* range to append */, &valueRange /* data range to append */);
+      }
+      send_data = false;
+      send_data2 = false;
+      record_code = 0;
       vTaskDelay(10);
       if (success){
         response.toString(Serial, true);
@@ -1569,6 +1580,7 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   InitCCC = CCC;
   Net_kWh = 0;
   acc_energy = 0;
+  prev_energy = 0;
   acc_Ah = 0;
   UsedSoC = 0;
   kWh_corr = 0;
@@ -1622,6 +1634,7 @@ void ResetCurrTrip() {  // when the car is turned On, current trip value are res
     Serial.println("Trip Reset");
     Prev_kWh = Net_kWh;
     last_energy = acc_energy;
+    prev_energy = acc_energy;
     SocRatioCalc();
     used_kwh = calc_kwh(SoC, InitSoC) + kWh_corr;
     left_kwh = calc_kwh(0, SoC) - kWh_corr;
@@ -2263,8 +2276,15 @@ void loop() {
   ready = GSheet.ready();
   if (millis() - GSheetTimer >= sendInterval){
     GSheetTimer = millis();
-    if (send_enabled && ready) {                         
-        send_data = true;  // This will trigger logic to send data to Google sheet       
+    if (send_enabled && ready) {
+      // Get timestamp
+      t = getTime();
+      Serial.print("Time updated: ");
+      Serial.println(t);
+      
+      sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));                         
+      
+      send_data = true;  // This will trigger logic to send data to Google sheet       
     }    
     else {
       sendIntervalOn = true;
