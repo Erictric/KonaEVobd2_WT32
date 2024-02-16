@@ -154,7 +154,7 @@ float OUTDOORtemp;
 float INDOORtemp;
 char SpdSelect;
 char* SpdSelected = "X";
-uint32_t Odometer;
+unsigned long Odometer;
 float Speed;
 byte TransSelByte;
 byte Park;
@@ -195,7 +195,7 @@ float Net_Ah = 0;
 float DischAh = 0;
 float RegenAh = 0;
 float TripOdo = 0;
-int InitOdo = 0;
+unsigned long InitOdo = 0;
 float PrevOPtimemins = 0;
 float TripOPtime = 0;
 float CurrTimeInit = 0;
@@ -210,11 +210,14 @@ float PrevBmsSoC = 0;
 float Regen = 0;
 float Discharg = 0;
 float LastSoC = 0;
-float integrate_timer = 0.0;
+unsigned long integrateP_timer = 0.0;
+unsigned long integrateI_timer = 0.0;
 float start_kwh;
 float acc_energy = 0.0;
 float prev_energy = 0.0;
 float delta_energy = 0.0;
+float previous_kWh = 0.0;
+float delta_kWh = 0.0;
 float acc_regen;
 float acc_Ah = 0.0;
 float last_energy = 0.0;
@@ -252,7 +255,7 @@ float Est_range;
 float Est_range2;
 float Est_range3;
 unsigned long RangeCalcTimer;
-uint32_t  RangeCalcUpdate = 2000; 
+unsigned long  RangeCalcUpdate = 2000; 
 float acc_kWh_25;
 float acc_kWh_10;
 float acc_kWh_0;
@@ -289,7 +292,7 @@ int nbr_decimal[10];
 bool Charge_page = false;
 bool Power_page = false;
 unsigned long read_timer;
-uint32_t read_data_interval = 2000;
+unsigned long read_data_interval = 2000;
 unsigned long ELM_Port_timer;
 
 // Variables for touch x,y
@@ -394,7 +397,7 @@ bool send_data2 = false;
 bool data_sent = false;
 bool ready = false;   // Google Sheet ready flag
 bool success = false;
-uint16_t sendInterval = 10000;  // in millisec
+unsigned long sendInterval = 10000;  // in millisec
 unsigned long GSheetTimer = 0;
 bool sendIntervalOn = false;
 time_t t = 0;   // Variable to save current epoch time
@@ -560,11 +563,12 @@ void setup() {
 
   /*////// Get the stored value from last re-initialisation /////*/
 
-  Net_kWh = EEPROM.readFloat(0);
+  prev_energy = EEPROM.readFloat(0);
   InitCED = EEPROM.readFloat(4);
   InitCEC = EEPROM.readFloat(8);
   InitSoC = EEPROM.readFloat(12);
-  UsedSoC = EEPROM.readFloat(16);
+  previous_kWh = EEPROM.readFloat(16);
+  //UsedSoC = EEPROM.readFloat(16);
   InitOdo = EEPROM.readFloat(20);
   InitCDC = EEPROM.readFloat(24);
   InitCCC = EEPROM.readFloat(28);
@@ -613,7 +617,8 @@ void setup() {
 
   tft.fillScreen(TFT_BLACK);
 
-  integrate_timer = millis() / 1000;
+  integrateP_timer = millis();
+  integrateI_timer = millis();
   RangeCalcTimer = millis();
   read_timer = millis();
   GSheetTimer = millis();
@@ -692,7 +697,6 @@ int convertToInt(char* dataFrame, size_t startByte, size_t numberBytes) {
 
 void read_data() {
 
-  //pid_counter++;
   Serial.println(pid_counter);
 
   button();
@@ -752,15 +756,17 @@ void read_data() {
   UpdateNetEnergy();
   pwr_changed += 1;
   
-  if (BMS_relay){
+  if (pid_counter > 8 || !BMS_relay){
+    pid_counter = 0;
+  }
+  else if (BMS_relay){
   // Read remaining PIDs only if BMS relay is ON
     switch (pid_counter) {
       case 1:
   
         button();
         myELM327.sendCommand("AT SH 7E4");  // Set Header for BMS
-        Serial.println("read PID105");
-  
+          
         if (myELM327.queryPID("220105")) {  // Service and Message PID = hex 22 0105 => dec 34, 261
           char* payload = myELM327.payload;
           size_t payloadLen = myELM327.recBytes;
@@ -989,12 +995,14 @@ void read_data() {
             used_kwh = calc_kwh(SoC, InitSoC);
             left_kwh = calc_kwh(0, SoC);
             PrevSoC = SoC;
+            delta_kWh = Net_kWh - previous_kWh;
+            previous_kWh = Net_kWh;
             Prev_kWh = Net_kWh;
             kWh_update = true;
             Integrat_power();
             delta_energy = acc_energy - prev_energy;
             prev_energy = acc_energy;
-            if (send_enabled) {
+            if (ready) {
               // Get timestamp
               t = getTime();
               Serial.print("Time updated: ");
@@ -1138,8 +1146,8 @@ void UpdateNetEnergy() {
 void Integrat_power() {
   float pwr_interval;
   float int_pwr;
-  pwr_interval = (millis() - integrate_timer) / 1000;
-  integrate_timer = millis();
+  pwr_interval = (millis() - integrateP_timer) / 1000;
+  integrateP_timer = millis();
   int_pwr = Power * pwr_interval / 3600;
   acc_energy += int_pwr;
   if (int_pwr < 0) {
@@ -1156,7 +1164,8 @@ void Integrat_power() {
 void Integrat_current() {
   float curr_interval;
   float int_curr;
-  curr_interval = (millis() - integrate_timer) / 1000;
+  curr_interval = (millis() - integrateI_timer) / 1000;
+  integrateI_timer = millis();
   int_curr = BATTc * curr_interval / 3600;
   acc_Ah += int_curr;
 }
@@ -1347,7 +1356,7 @@ void tokenStatusCallback(TokenInfo info){
 
 void sendGoogleSheet(void * pvParameters){
   for(;;){        
-    if (send_enabled && (send_data || record_code != 0 || send_data2)) {
+    if (ready && (send_data || record_code != 0 || send_data2)) {
             
       code_sent = false;
       
@@ -1521,17 +1530,18 @@ void sendGoogleSheet(void * pvParameters){
         valueRange.set("values/[76]/[0]", Deter_Min);
         valueRange.set("values/[77]/[0]", nbr_fails);
         valueRange.set("values/[78]/[0]", delta_energy);
+        valueRange.set("values/[79]/[0]", delta_kWh);
       }                                   
             
       // Append values to the spreadsheet
       if (send_data || record_code != 0){
         success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet1!A1" /* range to append */, &valueRange /* data range to append */);
       }
-      if (send_data2){
+      if (send_data2 && !send_data){
         success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet2!A1" /* range to append */, &valueRange /* data range to append */);
+        send_data2 = false;
       }
-      send_data = false;
-      send_data2 = false;
+      send_data = false;      
       record_code = 0;
       vTaskDelay(10);
       if (success){
@@ -1592,12 +1602,12 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   PrevOPtimemins = 0;
   LastSoC = SoC;
   PrevBmsSoC = BmsSoC;
-  EEPROM.writeFloat(0, Net_kWh);  //save initial CED to Flash memory
+  //EEPROM.writeFloat(0, Net_kWh);  //save initial CED to Flash memory
   EEPROM.writeFloat(52, acc_energy);
   EEPROM.writeFloat(4, InitCED);   //save initial CED to Flash memory
   EEPROM.writeFloat(8, InitCEC);   //save initial CEC to Flash memory
   EEPROM.writeFloat(12, InitSoC);  //save initial SoC to Flash memory
-  EEPROM.writeFloat(16, UsedSoC);  //save initial SoC to Flash memory
+  //EEPROM.writeFloat(16, UsedSoC);  //save initial SoC to Flash memory
   EEPROM.writeFloat(20, InitOdo);  //save initial Odometer to Flash memory
   EEPROM.writeFloat(24, InitCDC);  //save initial CDC to Flash memory
   EEPROM.writeFloat(28, InitCCC);  //save initial CCC to Flash memory
@@ -1610,7 +1620,8 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   CurrTripReg = 0;
   CurrTripDisc = 0;
   CurrTimeInit = OPtimemins;
-  integrate_timer = millis();
+  integrateP_timer = millis();
+  integrateI_timer = millis();
   distance = 0;
   CurrInitAccEnergy = 0;
   SocRatioCalc();
@@ -1634,7 +1645,7 @@ void ResetCurrTrip() {  // when the car is turned On, current trip value are res
     Serial.println("Trip Reset");
     Prev_kWh = Net_kWh;
     last_energy = acc_energy;
-    prev_energy = acc_energy;
+    //prev_energy = acc_energy;
     SocRatioCalc();
     used_kwh = calc_kwh(SoC, InitSoC) + kWh_corr;
     left_kwh = calc_kwh(0, SoC) - kWh_corr;
@@ -1644,7 +1655,7 @@ void ResetCurrTrip() {  // when the car is turned On, current trip value are res
     full_kwh = calc_kwh(0, 100);
     start_kwh = calc_kwh(0, InitSoC);
     ResetOn = false;
-    DrawBackground = true;
+    //DrawBackground = true;
     for (uint8_t i = 0; i < N_km; i++) {
       energy_array[i] = acc_energy;
     }
@@ -1674,6 +1685,8 @@ void save_lost(char selector) {
   if ((selector == 'P' || selector == 'N') && DriveOn && SoC > 0) {  // when the selector is set to Park or Neutral, some value are saved to be used the next time the car is started
     DriveOn = false;
 
+    EEPROM.writeFloat(0, prev_energy);
+    EEPROM.writeFloat(16, previous_kWh);    
     EEPROM.writeFloat(32, degrad_ratio);
     Serial.println("new_lost saved to EEPROM");
     EEPROM.writeFloat(36, PIDkWh_100);  //save actual kWh/100 in Flash memory
@@ -1710,6 +1723,8 @@ void save_lost(char selector) {
 void stop_esp() {
   ESP_on = false;
   if (DriveOn && (mem_SoC > 0)) {
+    EEPROM.writeFloat(0, prev_energy);
+    EEPROM.writeFloat(16, previous_kWh);
     EEPROM.writeFloat(32, degrad_ratio);
     Serial.println("new_lost saved to EEPROM");
     EEPROM.writeFloat(36, PIDkWh_100);  //save actual kWh/100 in Flash memory
@@ -2264,8 +2279,7 @@ void loop() {
   }
   else if (((millis() - read_timer) > read_data_interval) && OBD2connected){ // if BMS is not On, only scan OBD2 at some intervals
     read_data();
-    read_timer = millis();
-    pid_counter = 0;        
+    read_timer = millis();            
   }
   
   /*/////// Check if touch buttons are pressed /////////////////*/
@@ -2273,10 +2287,12 @@ void loop() {
     
   /*/////// This will trigger logic to send data to Google sheet /////////////////*/    
   
-  ready = GSheet.ready();
+  if (send_enabled){
+    ready = GSheet.ready();
+  }
   if (millis() - GSheetTimer >= sendInterval){
     GSheetTimer = millis();
-    if (send_enabled && ready) {
+    if (ready) {
       // Get timestamp
       t = getTime();
       Serial.print("Time updated: ");
@@ -2314,8 +2330,9 @@ void loop() {
   /*/////// Display Page Number /////////////////*/
 
   if ((ESP_on || (BMS_relay && Power < 0)) && SoC != 0 && !sd_condition1) {    
-    
-    if (display_off){      
+    Serial.println(" ESP is ON");
+    if (display_off){
+      Serial.println("Turning Display ON");
       ledcWrite(pwmLedChannelTFT, 128);
       tft.writecommand(ST7789_SLPOUT);// Wakes up the display driver
       tft.writecommand(ST7789_DISPON); // Switch on the display      
@@ -2330,6 +2347,7 @@ void loop() {
           initscan = true;  // To write header name on Google Sheet
         }        
       }
+      Serial.println("Display going ON");
       DrawBackground = true;
     }
 
@@ -2356,7 +2374,7 @@ void loop() {
     tft.writecommand(ST7789_DISPOFF); // Switch off the display
     tft.writecommand(ST7789_SLPIN); // Sleep the display driver
     display_off = true;
-    ESP_on = false;
+    //ESP_on = false;
   }
 
   /*/////// Stop ESP /////////////////*/

@@ -12,19 +12,22 @@ const char* ssid2 = "VIRGIN131";
 const char* password2 = "3D4F2F3311D5";
 const char* ssid = "WT32-SC01";
 const char* password = "5311Fond";
+unsigned long init_time;
+float connect_time = 0;
+bool firstTry = false;
 
 void ConnectWifi(TFT_eSPI& tft, uint16_t Wifi_select){
   
-  char strRetries[2];
+  char strConnectTime[3];
   Serial.println("Connecting to Wifi "); 
 
   Serial.print("Wifi_Select=  ");
-  Serial.println(Wifi_select);
+  Serial.println(Wifi_select);  
   
   //wifiMulti.addAP(ssid, password);
   //wifiMulti.addAP(ssid2, password2);
   
-  WiFi.disconnect();
+  //WiFi.disconnect();
   if (Wifi_select == 0){
     WiFi.begin(ssid, password);
   }
@@ -40,14 +43,20 @@ void ConnectWifi(TFT_eSPI& tft, uint16_t Wifi_select){
   tft.drawString("To", tft.width() / 2, tft.height() / 2);
   tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 + 50);
   
-  int retries = 0; 
-  while (WiFi.status() != WL_CONNECTED  && (retries++ < 5)) { // 2 attempts     
-    delay(4000);
-    dtostrf(retries,1,0,strRetries);        
-    Serial.print("attempts: ");Serial.println(retries);
-    tft.fillScreen(TFT_BLACK);
-    tft.drawString("Retry", tft.width() / 2, tft.height() / 2 - 50);
-    tft.drawString(strRetries, tft.width() / 2, tft.height() / 2);    
+  while (WiFi.status() != WL_CONNECTED  && (connect_time < 15)) { // 2 attempts
+    if(firstTry){
+      connect_time = (millis() - init_time) / 1000;
+      dtostrf(connect_time,1,0,strConnectTime);        
+      //Serial.print("attempts: ");Serial.println(retries);
+      tft.fillScreen(TFT_BLACK);
+      tft.drawString("Retring", tft.width() / 2, tft.height() / 2 - 50);
+      tft.drawString(strConnectTime, tft.width() / 2, tft.height() / 2);
+    }    
+    else{
+      init_time = millis();
+      firstTry = true;
+    }
+    delay(1000);     
   }
   Serial.println("");
 
@@ -59,7 +68,8 @@ void ConnectWifi(TFT_eSPI& tft, uint16_t Wifi_select){
   
     tft.fillScreen(TFT_BLACK);
     tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 50);
-    tft.drawString("Connected", tft.width() / 2, tft.height() / 2);    
+    tft.drawString("Connected", tft.width() / 2, tft.height() / 2); 
+    firstTry = false;   
     delay(500);  
   }
   else
