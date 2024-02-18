@@ -210,8 +210,8 @@ float PrevBmsSoC = 0;
 float Regen = 0;
 float Discharg = 0;
 float LastSoC = 0;
-unsigned long integrateP_timer = 0.0;
-unsigned long integrateI_timer = 0.0;
+float integrateP_timer = 0.0;
+float integrateI_timer = 0.0;
 float start_kwh;
 float acc_energy = 0.0;
 float prev_energy = 0.0;
@@ -392,6 +392,7 @@ unsigned long stopESP_timer = 0;
 
 /*////// Variables for Google Sheet data transfer ////////////*/
 bool send_enabled = false;
+bool sending_data = false;
 bool send_data = false;
 bool send_data2 = false;
 bool data_sent = false;
@@ -454,6 +455,19 @@ unsigned long getTime() {
         now = now - 18000;
       }
   return now;
+}
+
+hw_timer_t *Timer0_Cfg = NULL;
+int send_update = 10000000;   // Send data update time in uSec.
+
+void IRAM_ATTR Timer0_ISR()
+{
+  if (ready) {
+      sending_data = true;  // This will trigger logic to send data to Google sheet       
+    }
+  else {
+    sendIntervalOn = true;
+  }         
 }
 
 
@@ -623,6 +637,12 @@ void setup() {
   read_timer = millis();
   GSheetTimer = millis();
   ELM_Port_timer = millis();
+
+  // Configure Timer0 Interrupt  
+  Timer0_Cfg = timerBegin(0, 80, true);
+  timerAttachInterrupt(Timer0_Cfg, &Timer0_ISR, true);
+  timerAlarmWrite(Timer0_Cfg, send_update, true);
+  timerAlarmEnable(Timer0_Cfg);
 }
 
 /*////////////////////////////////////////////////////////////////////////*/
@@ -1556,6 +1576,7 @@ void sendGoogleSheet(void * pvParameters){
         failsent = true;
         nbr_fails += 1;
       }
+      GSheetTimer = millis();
       Serial.println();
       Serial.print("FreeHeap: ");
       Serial.println(ESP.getFreeHeap());
@@ -2290,22 +2311,18 @@ void loop() {
   if (send_enabled){
     ready = GSheet.ready();
   }
-  if (millis() - GSheetTimer >= sendInterval){
-    GSheetTimer = millis();
-    if (ready) {
-      // Get timestamp
-      t = getTime();
-      Serial.print("Time updated: ");
-      Serial.println(t);
-      
-      sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));                         
-      
-      send_data = true;  // This will trigger logic to send data to Google sheet       
-    }    
-    else {
-      sendIntervalOn = true;
-    }       
-  }
+
+  if (sending_data){    
+    // Get timestamp
+    t = getTime();
+    Serial.print("Time updated: ");
+    Serial.println(t);
+    
+    sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));                         
+    
+    send_data = true;  // This will trigger logic to send data to Google sheet
+    sending_data = false;       
+  }      
 
   //  To display a led status when values are sent to Google Sheet
   if (datasent){
