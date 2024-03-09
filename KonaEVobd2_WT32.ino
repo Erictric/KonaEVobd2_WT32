@@ -120,6 +120,7 @@ bool wifiReconn = false;
 bool datasent = false;
 bool failsent = false;
 uint16_t nbr_fails = 0;
+uint16_t nbr_notReady = 0;
 
 float BattMinT;
 float BattMaxT;
@@ -143,6 +144,7 @@ float Max_Pwr;
 float Max_Reg;
 float SoC;
 float SoCratio;
+float SoCratioRef = 0;
 float Calc_kWh_corr;
 float SOH;
 float Deter_Min;
@@ -180,10 +182,10 @@ float Power;
 float CurrInitOdo = 0;
 float CurrInitCEC = 0;
 float CurrInitCED = 0;
-float CurrInitSoC = 0;
+//float CurrInitSoC = 0;
 float CurrTripOdo;
 float CurrNet_kWh;
-float CurrUsedSoC;
+//float CurrUsedSoC;
 float CurrTripDisc;
 float CurrTripReg;
 float CurrInitAccEnergy;
@@ -233,12 +235,14 @@ float distance = 0.0;
 float prev_dist = 0;
 float interval_dist = 0;
 float Trip_dist = 0;
+float dist_save = 0;
+float init_distsave = 0;
 float prev_odo = 0;
 float prev_power = 0.0;
 int pwr_changed = 0;
 int loop_count = 0;
 float full_kwh;
-float EstFull_kWh;
+//float EstFull_kWh;
 float EstFull_Ah;
 float kWh_corr;
 float left_kwh;
@@ -293,7 +297,6 @@ bool Charge_page = false;
 bool Power_page = false;
 unsigned long read_timer;
 unsigned long read_data_interval = 2000;
-unsigned long ELM_Port_timer;
 
 // Variables for touch x,y
 static int32_t x, y;
@@ -629,14 +632,7 @@ void setup() {
     0);                 /* Core where the task should run */
   delay(500);   
 
-  tft.fillScreen(TFT_BLACK);
-
-  integrateP_timer = millis();
-  integrateI_timer = millis();
-  RangeCalcTimer = millis();
-  read_timer = millis();
-  GSheetTimer = millis();
-  ELM_Port_timer = millis();
+  tft.fillScreen(TFT_BLACK);  
 
   // Configure Timer0 Interrupt  
   Timer0_Cfg = timerBegin(0, 80, true);
@@ -956,7 +952,7 @@ void read_data() {
   
       UsedSoC = InitSoC - SoC;
   
-      CurrUsedSoC = CurrInitSoC - SoC;
+      //CurrUsedSoC = CurrInitSoC - SoC;
   
       if (UsedSoC < 0.5){
         EstFull_Ah = 186;
@@ -1042,6 +1038,8 @@ void read_data() {
                 degrad_ratio = 1;
               }
             }
+            start_kwh = calc_kwh(InitSoC, 100);
+            full_kwh = Net_kWh + (start_kwh + left_kwh) * degrad_ratio;
           }
         }
   
@@ -1079,7 +1077,7 @@ void read_data() {
         reset_trip();      
       }
   
-      EstFull_kWh = full_kwh * degrad_ratio;
+      //EstFull_kWh = full_kwh * degrad_ratio;
       EstLeft_kWh = left_kwh * degrad_ratio;
   
       if ((millis() - RangeCalcTimer) > RangeCalcUpdate){
@@ -1213,9 +1211,9 @@ void N_km_energy(float latest_energy) {
 
 void Integrat_speed() {
   speed_interval = (millis() - init_speed_timer) / 1000;
+  init_speed_timer = millis();
   int_speed = Speed * speed_interval / 3600;
   distance += (int_speed * 1.022);  // need to apply a 1.022 to get correct distance
-  init_speed_timer = millis();
 }
 
 //--------------------------------------------------------------------------------------------
@@ -1226,7 +1224,7 @@ void RangeCalc() {
 
   if ((prev_odo != CurrTripOdo) && (distance < 0.9)) {
     if (TripOdo < 2) {
-      InitOdo = Odometer - distance;  // correct initial odometer value[ using speed integration if odometer changes within 0.9km
+      InitOdo = Odometer - distance;  // correct initial odometer value using speed integration if odometer changes within 0.9km
       TripOdo = Odometer - InitOdo;
     }
     CurrInitOdo = Odometer - distance;
@@ -1234,13 +1232,16 @@ void RangeCalc() {
     prev_dist = distance;
     prev_odo = CurrTripOdo;
     N_km_energy(acc_energy);
-  } else if (prev_odo != CurrTripOdo) {
+  } 
+  else if (prev_odo != CurrTripOdo) {
     prev_dist = distance;
     prev_odo = CurrTripOdo;
     N_km_energy(acc_energy);
   }
   interval_dist = distance - prev_dist;
   Trip_dist = CurrTripOdo + interval_dist;
+  dist_save = Trip_dist - init_distsave;
+
 
   if (Trip_dist >= 0.25 && !ResetOn) {
     kWh_100km = CurrAccEnergy * 100 / Trip_dist;
@@ -1261,9 +1262,13 @@ void RangeCalc() {
     Est_range = (EstLeft_kWh / kWh_100km) * 100;
     Est_range2 = (EstLeft_kWh / span_kWh_100km) * 100;
     Est_range3 = (EstLeft_kWh / PIDkWh_100) * 100;
+    if (Est_range3 < 0){
+      Est_range3 = 999;
+    }
   } else {
     Est_range = 999;
     Est_range2 = 999;
+    Est_range3 = 999;
   }
 }
 
@@ -1271,12 +1276,19 @@ void RangeCalc() {
 //                   Ratio of Real Battery Capacity Used Function
 //--------------------------------------------------------------------------------------------
 
-/*//////Function to calculate the real  //////////*/
+/*//////Function to calculate the % of BmsSoC being used //////////*/
 
 void SocRatioCalc() {
   SoCratio = (BmsSoC / SoC) * 100;
+  if (SoCratioRef == 0){
+    SoCratioRef = SoCratio;
+  }
+  if (abs(SoCratioRef - SoCratio) > 0.3){
+    SoCratio = (SoCratio + SoCratioRef) / 2;
+  }
+  SoCratioRef = SoCratio;
   
-  Calc_kWh_corr = 1 - (0.97 - (SoCratio / 100));
+  Calc_kWh_corr = 1 - (0.965 - (SoCratio / 100));
 }
 
 //--------------------------------------------------------------------------------------------
@@ -1337,10 +1349,10 @@ double Interpolate(double xvalue[], double yvalue[], int numvalue, double pointX
   t = t * t * (3 - 2 * t);
   return yvalue[i] * (1 - t) + yvalue[i + 1] * t;
 }
-
+/*
 float calc_kwh(float min_SoC, float max_SoC) {
   /* variable for kWh/%SoC calculation: xvalue = %SoC and yvalue = kWh */
-  const int numvalue = 21;
+  /*const int numvalue = 21;
   double xvalue[] = { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 };
   //double yvalue[] = { 0.5487, 0.5921, 0.5979, 0.6053, 0.6139, 0.6199, 0.6238, 0.6268, 0.6295, 0.6324, 0.6362, 0.6418, 0.6524, 0.6601, 0.6684, 0.6771, 0.6859, 0.6951, 0.7046, 0.7147, 0.7249};
   double yvalue[] = { 0.5432, 0.5867, 0.5931, 0.6011, 0.6102, 0.6168, 0.6213, 0.6249, 0.6282, 0.6317, 0.6362, 0.6424, 0.6537, 0.6621, 0.6711, 0.6805, 0.6900, 0.7000, 0.7102, 0.7211, 0.7321 };
@@ -1357,6 +1369,19 @@ float calc_kwh(float min_SoC, float max_SoC) {
   }
   //return_kwh = integral * interval;
   return_kwh = (integral * interval) * Calc_kWh_corr;
+  return return_kwh;
+}*/
+
+float calc_kwh(float min_SoC, float max_SoC) {
+  /*  */
+  double a = 0.000878878391;
+  double b = 0.552912160927;
+  
+  float max_kwh = a * pow(max_SoC,2) + b * max_SoC;
+  float min_kwh = a * pow(min_SoC,2) + b * min_SoC;
+  float return_kwh;
+    
+  return_kwh = (max_kwh - min_kwh) * Calc_kWh_corr;
   return return_kwh;
 }
 
@@ -1551,6 +1576,7 @@ void sendGoogleSheet(void * pvParameters){
         valueRange.set("values/[77]/[0]", nbr_fails);
         valueRange.set("values/[78]/[0]", delta_energy);
         valueRange.set("values/[79]/[0]", delta_kWh);
+        valueRange.set("values/[80]/[0]", TripOdo);
       }                                   
             
       // Append values to the spreadsheet
@@ -1612,6 +1638,7 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   Net_kWh = 0;
   acc_energy = 0;
   prev_energy = 0;
+  previous_kWh = 0;
   acc_Ah = 0;
   UsedSoC = 0;
   kWh_corr = 0;
@@ -1625,10 +1652,11 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   PrevBmsSoC = BmsSoC;
   //EEPROM.writeFloat(0, Net_kWh);  //save initial CED to Flash memory
   EEPROM.writeFloat(52, acc_energy);
+  EEPROM.writeFloat(0, prev_energy);  
   EEPROM.writeFloat(4, InitCED);   //save initial CED to Flash memory
   EEPROM.writeFloat(8, InitCEC);   //save initial CEC to Flash memory
   EEPROM.writeFloat(12, InitSoC);  //save initial SoC to Flash memory
-  //EEPROM.writeFloat(16, UsedSoC);  //save initial SoC to Flash memory
+  EEPROM.writeFloat(16, previous_kWh);  
   EEPROM.writeFloat(20, InitOdo);  //save initial Odometer to Flash memory
   EEPROM.writeFloat(24, InitCDC);  //save initial CDC to Flash memory
   EEPROM.writeFloat(28, InitCCC);  //save initial CCC to Flash memory
@@ -1637,7 +1665,7 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   CurrInitCED = CED;
   CurrInitCEC = CEC;
   CurrInitOdo = Odometer;
-  CurrInitSoC = SoC;
+  //CurrInitSoC = SoC;
   CurrTripReg = 0;
   CurrTripDisc = 0;
   CurrTimeInit = OPtimemins;
@@ -1647,7 +1675,8 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   CurrInitAccEnergy = 0;
   SocRatioCalc();
   last_energy = acc_energy;
-  start_kwh = calc_kwh(0, InitSoC);
+  start_kwh = calc_kwh(InitSoC, 100);
+  full_kwh = Net_kWh + (start_kwh + left_kwh) * degrad_ratio;
 }
 
 /*////////////// Current Trip Reset ///////////////// */
@@ -1655,11 +1684,16 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
 void ResetCurrTrip() {  // when the car is turned On, current trip value are resetted.
 
   if (ResetOn && (SoC > 1) && (Odometer > 1) && (CED > 1) && data_ready) {  // ResetOn condition might be enough, might need to update code...
+    integrateP_timer = millis();
+    integrateI_timer = millis();
+    RangeCalcTimer = millis();
+    read_timer = millis();
+    GSheetTimer = millis();    
     CurrInitAccEnergy = acc_energy;
     CurrInitCED = CED;
     CurrInitCEC = CEC;
     CurrInitOdo = Odometer;
-    CurrInitSoC = SoC;
+    //CurrInitSoC = SoC;
     CurrTripReg = 0;
     CurrTripDisc = 0;
     CurrTimeInit = OPtimemins;
@@ -1672,9 +1706,8 @@ void ResetCurrTrip() {  // when the car is turned On, current trip value are res
     left_kwh = calc_kwh(0, SoC) - kWh_corr;
 
     PrevSoC = SoC;
-    PrevBmsSoC = BmsSoC;
-    full_kwh = calc_kwh(0, 100);
-    start_kwh = calc_kwh(0, InitSoC);
+    PrevBmsSoC = BmsSoC;    
+    
     ResetOn = false;
     //DrawBackground = true;
     for (uint8_t i = 0; i < N_km; i++) {
@@ -1684,6 +1717,8 @@ void ResetCurrTrip() {  // when the car is turned On, current trip value are res
     if ((degrad_ratio > 1.2) || (degrad_ratio < 0.7)) {  // if a bad values got saved previously, initial ratio to 1
       degrad_ratio = 1;
     }
+    start_kwh = calc_kwh(InitSoC, 100);
+    full_kwh = Net_kWh + (start_kwh + left_kwh) * degrad_ratio;
   }
 }
 
@@ -1836,8 +1871,14 @@ void button(){
       if (TouchTime >= 3 & !TouchLatch){
         Serial.println("Button1 Long Press");
         TouchLatch = true;        
-        InitRst = true;            
-        PrevSoC = 0;
+        //InitRst = true;            
+        //PrevSoC = 0;
+        if (send_enabled){
+          send_enabled = false;
+        }
+        else{
+          send_enabled = true;
+        }        
       }            
       if (!Btn1SetON)
       {  
@@ -1961,7 +2002,8 @@ void button(){
       {            
         Serial.println("Screen Touched");
         TouchLatch = true;        
-        reset_trip();                
+        InitRst = true;            
+        PrevSoC = 0;                
       }      
     }
   }
@@ -2135,7 +2177,7 @@ void page1() {
   strcpy(titre[6],"Est. range");
   strcpy(titre[7],"Est. range");  
   strcpy(titre[8],"Est. range");
-  strcpy(titre[9],"nbr_fails");
+  strcpy(titre[9],"full_kwh");
   value_float[0] = SoC;  
   value_float[1] = PIDkWh_100;
   value_float[2] = kWh_100km;
@@ -2145,7 +2187,7 @@ void page1() {
   value_float[6] = Est_range3;
   value_float[7] = Est_range;
   value_float[8] = Est_range2;
-  value_float[9] = nbr_fails;
+  value_float[9] = full_kwh;
   
   // set number of decimals for each value to display
   for (int i = 0; i < 10; i++) {  
@@ -2310,6 +2352,17 @@ void loop() {
   
   if (send_enabled){
     ready = GSheet.ready();
+    if (!ready){
+      nbr_notReady += 1;
+    }
+    if(nbr_fails > 10 || nbr_notReady > 10){
+      save_lost('P');
+      ESP.restart();
+    }
+    if(dist_save >= 25){
+      save_lost('P');
+      init_distsave = Trip_dist;
+    }
   }
 
   if (sending_data){    
@@ -2368,10 +2421,13 @@ void loop() {
       DrawBackground = true;
     }
 
-    if (StartWifi) {  // If wifi is configured then display wifi status led
-      if (WiFi.status() == WL_CONNECTED){
-          tft.fillCircle(300, 20, 6,TFT_GREEN);
-        }
+    if (StartWifi) {  // If wifi is configured then display wifi status led      
+      if (!send_enabled){
+        tft.fillCircle(300, 20, 6,TFT_WHITE);
+      }
+      else if (WiFi.status() == WL_CONNECTED){
+        tft.fillCircle(300, 20, 6,TFT_GREEN);
+      }
       else{
         tft.fillCircle(300, 20, 6,TFT_RED);
       }
