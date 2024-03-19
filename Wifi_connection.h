@@ -12,9 +12,11 @@ const char* ssid2 = "VIRGIN131";
 const char* password2 = "3D4F2F3311D5";
 const char* ssid = "WT32-SC01";
 const char* password = "5311Fond";
-unsigned long init_time;
+float init_time;
 float connect_time = 0;
 bool firstTry = false;
+bool send_enabled = false;
+bool initscan = false;
 
 void ConnectWifi(TFT_eSPI& tft, uint16_t Wifi_select){
   
@@ -61,15 +63,19 @@ void ConnectWifi(TFT_eSPI& tft, uint16_t Wifi_select){
   Serial.println("");
 
   if (WiFi.status() == WL_CONNECTED) {
+    connect_time = (millis() - init_time) / 1000;
     Serial.print("WiFi connected in: "); 
-    Serial.print(millis());
+    Serial.print(connect_time);
+    Serial.print(" secs");
     Serial.print(", IP address: "); 
     Serial.println(WiFi.localIP());
   
     tft.fillScreen(TFT_BLACK);
     tft.drawString("Wifi", tft.width() / 2, tft.height() / 2 - 50);
     tft.drawString("Connected", tft.width() / 2, tft.height() / 2); 
-    firstTry = false;   
+    firstTry = false;
+    send_enabled = true;
+    initscan = true;  // To write header name on Google Sheet on power up 
     delay(500);  
   }
   else
