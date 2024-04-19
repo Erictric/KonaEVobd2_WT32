@@ -72,8 +72,8 @@ const char spreadsheetId[] = "1Ho5H6qfHyVTo3fvcvrGUEGIylHTAWWfTAO8dBwZUqnI";
 // Token Callback function
 void tokenStatusCallback(TokenInfo info);
 
-TFT_eSPI tft = TFT_eSPI();
-Adafruit_FT6206 ts = Adafruit_FT6206();
+TFT_eSPI tft = TFT_eSPI();  // display class instanciation
+Adafruit_FT6206 ts = Adafruit_FT6206(); // touch screen class instanciation
 
 #define Threshold 40 /* threshold for touch wakeup - Greater the value[, more the sensitivity */
 #define ST7789_DISPOFF    0x28
@@ -90,13 +90,10 @@ const int pwmFreq = 5000;
 const int pwmResolution = 8;
 const int pwmLedChannelTFT = 0;
 
-//RTC_DATA_ATTR int bootCount = 0;
-
 //TFT y positions for texts and numbers
 uint16_t textLvl[10] = {65, 135, 205, 275, 345, 65, 135, 205, 275, 345};  // y coordinates for text
 uint16_t drawLvl[10] = {100, 170, 240, 310, 380, 100, 170, 240, 310, 380}; // and numbers
 
-#define pagenumbers 7  // number of pages to display
 #define N_km 10        //variable for the calculating kWh/100km over a N_km
 
 boolean ResetOn = true;
@@ -144,7 +141,7 @@ float Max_Pwr;
 float Max_Reg;
 float SoC;
 float SoCratio;
-float Calc_kWh_corr;
+//float Calc_kWh_corr;
 float SOH;
 float Deter_Min;
 int MinDetNb;
@@ -237,8 +234,8 @@ float dist_save = 0;
 float init_distsave = 0;
 float prev_odo = 0;
 float prev_power = 0.0;
-int pwr_changed = 0;
-int loop_count = 0;
+//int pwr_changed = 0;
+//int loop_count = 0;
 float full_kwh;
 float full_kwh2;
 float EstFull_Ah;
@@ -283,6 +280,7 @@ bool StartWifi = true;
 bool InitRst = false;
 bool TrigRst = false;
 bool kWh_update = false;
+bool SoC_decreased = false;
 bool corr_update = false;
 bool ESP_on = false;
 bool DrawBackground = true;
@@ -765,7 +763,7 @@ void read_data() {
     ESP_on = true;
   }
   UpdateNetEnergy();
-  pwr_changed += 1;
+  //pwr_changed += 1;
   
   if (pid_counter > 8 || !BMS_relay){
     pid_counter = 0;
@@ -993,6 +991,7 @@ void read_data() {
               PrevSoC = SoC;
               Prev_kWh = Net_kWh;
               kWh_update = true;
+              SoC_decreased = true;
             } 
             else {
               record_code = 4;
@@ -1005,27 +1004,34 @@ void read_data() {
             used_kwh2 = calc_kwh2(SoC, InitSoC);
             left_kwh = calc_kwh(0, SoC);
             left_kwh2 = calc_kwh2(0, SoC);
+            SoC_decreased = true;            
             PrevSoC = SoC;
             delta_kWh = Net_kWh - previous_kWh;
             previous_kWh = Net_kWh;
             Prev_kWh = Net_kWh;
-            kWh_update = true;
+            kWh_update = true;            
             Integrat_power();
             delta_energy = acc_energy - prev_energy;
             prev_energy = acc_energy;            
   
-            if ((used_kwh >= 2) && (SpdSelect == 'D')) {  // Wait till 2 kWh has been used to start calculating ratio to have a better accuracy
+            if ((used_kwh >= 4) && (SpdSelect == 'D')) {  // Wait till 4 kWh has been used to start calculating ratio to have a better accuracy
               degrad_ratio = Net_kWh / used_kwh;
               degrad_ratio2 = acc_energy / used_kwh2;
+              if ((degrad_ratio > 1.1) || (degrad_ratio < 0.9)) {  // if a bad value[ got saved previously, initialize ratio to 1
+                degrad_ratio = 1;
+              }
+              if ((degrad_ratio2 > 1.1) || (degrad_ratio2 < 0.9)) {  // if a bad value[ got saved previously, initialize ratio to 1
+                degrad_ratio2 = 1;
+              }
               old_lost = degrad_ratio;
             } 
             else {
               degrad_ratio = old_lost;
               degrad_ratio2 = old_lost;
-              if ((degrad_ratio > 1.2) || (degrad_ratio < 0.8)) {  // if a bad value[ got saved previously, initialize ratio to 1
+              if ((degrad_ratio > 1.1) || (degrad_ratio < 0.9)) {  // if a bad value[ got saved previously, initialize ratio to 1
                 degrad_ratio = 1;
               }
-              if ((degrad_ratio2 > 1.2) || (degrad_ratio2 < 0.8)) {  // if a bad value[ got saved previously, initialize ratio to 1
+              if ((degrad_ratio2 > 1.1) || (degrad_ratio2 < 0.9)) {  // if a bad value[ got saved previously, initialize ratio to 1
                 degrad_ratio2 = 1;
               }
             }
@@ -1371,8 +1377,20 @@ float calc_kwh(float min_SoC, float max_SoC) {
   
   //double a = 0.0009;
   //double b = 0.5508 * Calc_kWh_corr;
-  double a = 0.00091;
-  double b = 0.5498 * Calc_kWh_corr;
+  //double a = 0.001;
+  //double b = 0.5408 * Calc_kWh_corr;
+  //double a = 0.00105;
+  //double b = 0.5358 * Calc_kWh_corr;
+  //double a = 0.001025;
+  //double b = 0.5383 * Calc_kWh_corr;
+  //double a = 0.0007;
+  //double b = 0.5708 * Calc_kWh_corr;
+  //double a = 0.000675;
+  //double b = 0.5733 * Calc_kWh_corr;
+  float fullBattCapacity = 66.4;
+  float SoC100 = 100;
+  double b = 0.5733;
+  double a = ((fullBattCapacity * (SoCratio /100)) - (b * SoC100)) / pow(SoC100,2);  
   
   float max_kwh = a * pow(max_SoC,2) + b * max_SoC;
   float min_kwh = a * pow(min_SoC,2) + b * min_SoC;
@@ -1384,8 +1402,10 @@ float calc_kwh(float min_SoC, float max_SoC) {
 
 float calc_kwh2(float min_SoC, float max_SoC) {
   /*  */
-  double a = 0.00161056;
-  double b = 0.47974439  * Calc_kWh_corr;
+  float fullBattCapacity = 66.4;
+  float SoC100 = 100;
+  double b = 0.47974439;
+  double a = ((fullBattCapacity * (SoCratio /100)) - (b * SoC100)) / pow(SoC100,2);  
   
   float max_kwh = a * pow(max_SoC,2) + b * max_SoC;
   float min_kwh = a * pow(min_SoC,2) + b * min_SoC;
@@ -1600,12 +1620,12 @@ void sendGoogleSheet(void * pvParameters){
       // Append values to the spreadsheet
       if (send_data || record_code != 0){
         success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet1!A1" /* range to append */, &valueRange /* data range to append */);
+        send_data = false;
       }
       if (send_data2 && !send_data){
         success = GSheet.values.append(&response /* returned response */, spreadsheetId /* spreadsheet Id to append */, "Sheet2!A1" /* range to append */, &valueRange /* data range to append */);
         send_data2 = false;
-      }
-      send_data = false;      
+      }            
       record_code = 0;
       vTaskDelay(10);
       if (success){
@@ -1679,7 +1699,7 @@ void reset_trip() {  //Overall trip reset. Automatic if the car has been recharg
   distance = 0;
   CurrInitAccEnergy = 0;
   SocRatioCalc();
-  Calc_kWh_corr = 1 - (0.965 - (SoCratio / 100));
+  //Calc_kWh_corr = 1 - (0.965 - (SoCratio / 100));
   last_energy = acc_energy;
   start_kwh = calc_kwh(InitSoC, 100);
   full_kwh = Net_kWh + (start_kwh + left_kwh) * degrad_ratio;
@@ -1724,9 +1744,9 @@ void ResetCurrTrip() {  // when the car is turned On, current trip value are res
     if (SoCratio < 92 || SoCratio > 96.5) {  // In case something went wrong and ratio is out of bounds, initiate to 96.5 default value
       SoCratio = 96.5;
     }
-    Calc_kWh_corr = 1 - (0.965 - (SoCratio / 100));
+    //Calc_kWh_corr = 1 - (0.965 - (SoCratio / 100));
     degrad_ratio = old_lost;
-    if ((degrad_ratio > 1.2) || (degrad_ratio < 0.7)) {  // if a bad values got saved previously, initial ratio to 1
+    if ((degrad_ratio > 1.1) || (degrad_ratio < 0.9)) {  // if a bad values got saved previously, initial ratio to 1
       degrad_ratio = 1;
     }
     used_kwh = calc_kwh(SoC, InitSoC) + kWh_corr;
@@ -1837,7 +1857,17 @@ void stop_esp() {
     EEPROM.commit();
   }
   
-  if (!sd_condition2){
+  if (sd_condition2){
+    tft.setTextSize(1);
+    tft.setFreeFont(&FreeSans18pt7b);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_GREEN);
+    tft.drawString("ESP", tft.width() / 2, tft.height() / 2 - 50);
+    tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);    
+    delay(1000);
+    esp_deep_sleep_start();
+  }
+  else{
     tft.setTextSize(1);
     tft.setFreeFont(&FreeSans18pt7b);
     tft.fillScreen(TFT_BLACK);
@@ -1860,17 +1890,7 @@ void stop_esp() {
     send_enabled = false;
     wifiReconn = false;
     DrawBackground = true;
-  }
-  else{
-    tft.setTextSize(1);
-    tft.setFreeFont(&FreeSans18pt7b);
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_GREEN);
-    tft.drawString("ESP", tft.width() / 2, tft.height() / 2 - 50);
-    tft.drawString("Stopped", tft.width() / 2, tft.height() / 2);    
-    delay(1000);
-    esp_deep_sleep_start();
-  }  
+  }    
 }
 
 //--------------------------------------------------------------------------------------------
@@ -2385,7 +2405,7 @@ void loop() {
       init_distsave = Trip_dist;      
     }
 
-    if (sending_data || kWh_update){     /*/////// This will trigger logic to send data to Google sheet /////////////////*/
+    if (sending_data || SoC_decreased){     /*/////// This will trigger logic to send data to Google sheet /////////////////*/
       // Get timestamp
       t = getTime();
       Serial.print("Time updated: ");
@@ -2393,8 +2413,9 @@ void loop() {
       
       sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));                         
       
-      if(kWh_update){
-        send_data2 = true;
+      if(SoC_decreased){
+        SoC_decreased = false;
+        send_data2 = true;        
       }
       else{
         send_data = true;  // This will trigger logic to send data to Google sheet
@@ -2437,10 +2458,8 @@ void loop() {
       if ((WiFi.status() != WL_CONNECTED) && !wifiReconn && StartWifi) {  // If esp32 is On when start the car, reconnect wifi if not connected
         ConnectWifi(tft, Wifi_select);
         wifiReconn = true;
-        if (WiFi.status() == WL_CONNECTED) {
-          //send_enabled = true;
-          send_data = true;
-          //initscan = true;  // To write header name on Google Sheet
+        if (WiFi.status() == WL_CONNECTED) {          
+          send_data = true;          
         }        
       }
       Serial.println("Display going ON");
@@ -2523,7 +2542,7 @@ void loop() {
       if (!send_enabled) {               
         stop_esp();
       }
-      else if (code_sent || (shutdown_timer > (ESPTimerInterval + 2000))) {        
+      else if (code_sent || (shutdown_timer > (ESPTimerInterval + 20))) {        
         stop_esp();
       }     
     }

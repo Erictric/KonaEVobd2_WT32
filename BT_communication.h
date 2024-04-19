@@ -20,7 +20,7 @@ void ConnectToOBD2(TFT_eSPI& tft){
   
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_GREEN);
-  tft.drawString("Connection", tft.width() / 2, tft.height() / 2 - 50);
+  tft.drawString("Connecting", tft.width() / 2, tft.height() / 2 - 50);
   tft.drawString("To", tft.width() / 2, tft.height() / 2);
   tft.drawString("OBDII", tft.width() / 2, tft.height() / 2 + 50);
   tft.drawString("Device", tft.width() / 2, tft.height() / 2 + 100);
@@ -40,7 +40,7 @@ void ConnectToOBD2(TFT_eSPI& tft){
     tft.drawString(" Phase 1", tft.width() / 2, tft.height() / 2 + 100); 
     delay(500);    
     tft.fillScreen(TFT_BLACK);
-    tft.drawString("Connecting", tft.width() / 2, tft.height() / 2 - 50);
+    tft.drawString("Connection", tft.width() / 2, tft.height() / 2 - 50);
     tft.drawString("Retry", tft.width() / 2, tft.height() / 2);
     tft.drawString(strRetries, tft.width() / 2, tft.height() / 2 + 50);        
   }
