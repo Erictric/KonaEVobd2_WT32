@@ -854,12 +854,15 @@ void read_data() {
           //AuxBattV = convertToInt(results.frames[3], 2, 2)* 0.001; //doesn't work...
           int AuxCurrByte1 = convertToInt(results.frames[3], 4, 1);
           int AuxCurrByte2 = convertToInt(results.frames[3], 5, 1);
-          if (AuxCurrByte1 > 127) {  // the most significant bit is the sign bit so need to calculate commplement value[ if true
+          if (AuxCurrByte1 > 127) {  // the most significant bit is the sign bit so need to calculate commplement value if true
             AuxBattC = -1 * (((255 - AuxCurrByte1) * 256) + (256 - AuxCurrByte2)) * 0.01;
           } else {
             AuxBattC = ((AuxCurrByte1 * 256) + AuxCurrByte2) * 0.01;
           }
           AuxBattSoC = convertToInt(results.frames[3], 6, 1);
+          if (AuxBattSoC > 100){
+            AuxBattSoC = 100;
+          }
         }
         break;
   
@@ -1015,7 +1018,7 @@ void read_data() {
             prev_energy = acc_energy;            
   
             if ((used_kwh >= 4) && (SpdSelect == 'D')) {  // Wait till 4 kWh has been used to start calculating ratio to have a better accuracy
-              degrad_ratio = Net_kWh / used_kwh;
+              degrad_ratio = ((Net_kWh / used_kwh)) * 0.25 + (degrad_ratio * 0.75);
               degrad_ratio2 = acc_energy / used_kwh2;
               if ((degrad_ratio > 1.1) || (degrad_ratio < 0.9)) {  // if a bad value[ got saved previously, initialize ratio to 1
                 degrad_ratio = 1;
@@ -1389,7 +1392,8 @@ float calc_kwh(float min_SoC, float max_SoC) {
   //double b = 0.5733 * Calc_kWh_corr;
   float fullBattCapacity = 66.4;
   float SoC100 = 100;
-  double b = 0.5733;
+  double b = 0.5653;
+  //double b = 0.5733;
   double a = ((fullBattCapacity * (SoCratio /100)) - (b * SoC100)) / pow(SoC100,2);  
   
   float max_kwh = a * pow(max_SoC,2) + b * max_SoC;
@@ -1615,6 +1619,7 @@ void sendGoogleSheet(void * pvParameters){
         valueRange.set("values/[86]/[0]", start_kwh2);
         valueRange.set("values/[87]/[0]", left_kwh2);
         valueRange.set("values/[88]/[0]", InitSoC);
+        valueRange.set("values/[89]/[0]", mem_SoC);
       }                                   
             
       // Append values to the spreadsheet
@@ -2415,6 +2420,7 @@ void loop() {
       
       if(SoC_decreased){
         SoC_decreased = false;
+        mem_SoC = SoC;
         send_data2 = true;        
       }
       else{
