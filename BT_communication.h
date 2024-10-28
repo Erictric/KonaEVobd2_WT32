@@ -14,7 +14,7 @@ ELM327 myELM327;    //Object for OBD2 device
 bool OBD2connected = false;
 
 void ConnectToOBD2(TFT_eSPI& tft){
-  char strRetries[2];
+  char strRetries[2];  
   ELM_PORT.setPin("1234");
   ELM_PORT.begin("ESP32", true);    
   

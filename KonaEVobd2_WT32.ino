@@ -525,6 +525,7 @@ void setup() {
   Serial.print("Configuring PWM for TFT backlight... ");
   ledcSetup(pwmLedChannelTFT, pwmFreq, pwmResolution);
   ledcAttachPin(TFT_BL, pwmLedChannelTFT);
+  //ledcAttach(pwmLedChannelTFT, pwmFreq, pwmResolution);
   Serial.println("DONE");
 
   Serial.print("Setting PWM for TFT backlight to default intensity... ");
@@ -609,7 +610,8 @@ void setup() {
   acc_dist_m10 = EEPROM.readFloat(128);
   acc_dist_m20 = EEPROM.readFloat(132);
   acc_dist_m20p = EEPROM.readFloat(136);
-  acc_regen = EEPROM.readFloat(140);
+  acc_regen = 
+  (140);
 
   //initial_eeprom(); //if a new eeprom memory is used it needs to be initialize to something first
 
@@ -978,7 +980,7 @@ void read_data() {
           // After a Trip Reset, perform a new reset if SoC changed without a Net_kWh increase (in case SoC was just about to change when the reset was performed)
           if (((acc_energy < 0.25) && (PrevSoC > SoC)) || ((SoC > 98.5) && ((PrevSoC - SoC) > 0.5))) {
             //if(((Net_kWh < 0.3) && (PrevSoC > SoC)) || ((SoC > 98.5) && ((PrevSoC - SoC) > 0.5)) || (TrigRst && (PrevSoC > SoC))){          
-            if ((acc_energy < 0.3) && (PrevSoC > SoC)) {
+            if ((acc_energy < 0.25) && (PrevSoC > SoC)) {
               initscan = true;
               mem_energy = acc_energy;
               mem_PrevSoC = PrevSoC;
@@ -1454,6 +1456,7 @@ void sendGoogleSheet(void * pvParameters){
           valueRange.add("majorDimension","COLUMNS");
           valueRange.set("values/[0]/[0]", EventCode0);          
           initscan = false;
+          shutdown_esp = false;
           break;
 
         case 1:   // Write status for Reset after a battery was recharged
@@ -2418,9 +2421,9 @@ void loop() {
       
       sprintf(EventTime, "%02d-%02d-%02d %02d:%02d:%02d", day(t), month(t), year(t), hour(t), minute(t), second(t));                         
       
-      if(SoC_decreased){
+      if(SoC_decreased && (SoC < mem_SoC) || mem_SoC == 0){
         SoC_decreased = false;
-        mem_SoC = SoC;
+        mem_SoC = SoC;           
         send_data2 = true;        
       }
       else{
